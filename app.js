@@ -283,9 +283,15 @@ function aptaPara(r, slot){
 }
 const clamp = (x, a, b) => Math.min(Math.max(x, a), b);
 function escalaPara(r, t){ return Math.round(clamp(t.kcal / Math.max(r.kcal, 1), 0.5, 2) * 20) / 20; }
+/* Error entre lo que da el menú y el objetivo. No es simétrico: quedarse corto de proteína es
+   lo peor (y más si se quiere bajar peso); pasarse de grasa también; los hidratos, simétrico. */
+function errMacros(v, t){
+  const d = (x, o, minimo, wFalta, wSobra) => { const dif = x - o, den = Math.max(o, minimo); return (dif < 0 ? -dif*wFalta : dif*wSobra)/den; };
+  return d(v.prot, t.prot, 10, 4, 0.4) + d(v.carb, t.carb, 15, 1, 1) + d(v.fat, t.fat, 8, 0.4, 2);
+}
 function puntua(r, t, usos, previa, delDia){
   const s = escalaPara(r, t);
-  const e = Math.abs(r.prot*s - t.prot)/Math.max(t.prot, 10) + Math.abs(r.carb*s - t.carb)/Math.max(t.carb, 15) + Math.abs(r.fat*s - t.fat)/Math.max(t.fat, 8);
+  const e = errMacros({prot:r.prot*s, carb:r.carb*s, fat:r.fat*s}, t);
   let h = 0; String(r.id).split('').forEach(c => h = (h*31 + c.charCodeAt(0)) % 997);
   return e + 0.25*Math.abs(s - 1) + 0.35*(usos[r.id]||0) + (previa === r.id ? 1 : 0) + (delDia && delDia[r.id] ? 1.5 : 0) + (h % 7) * 0.01;
 }
@@ -338,9 +344,37 @@ async function proponerMenu(){
         else meals.push({slot, rid:null});
       });
     }
+    if (obj) afinarDia(obj, meals, menu[i-1], usos);
     menu.push({meals});
   }
   S.menu = menu; setMsg('Menú propuesto. Toca cualquier comida para cambiarla.', true); render(); await guardarMenu();
+}
+/* Segunda pasada: ajusta el día ENTERO (no cada comida por separado) para que las kcal cuadren y
+   la proteína no se quede corta ni la grasa se pase. Prueba otras recetas y raciones comida a comida. */
+function afinarDia(obj, meals, diaPrevio, usos){
+  const suma = ms => { const t = {kcal:0, prot:0, carb:0, fat:0}; ms.forEach(m => { if (m.rid) { const v = valsComida(m); t.kcal += v.kcal; t.prot += v.prot; t.carb += v.carb; t.fat += v.fat; } }); return t; };
+  const costeDia = ms => { const t = suma(ms); return 3*Math.max(Math.abs(t.kcal - obj.kcal) - 0.03*obj.kcal, 0)/obj.kcal + errMacros(t, obj); };
+  for (let pasada = 0; pasada < 3; pasada++) {
+    let mejoro = false;
+    meals.forEach((m, j) => {
+      if (!m.rid || m.fija) return;
+      const otras = meals.filter((x, k) => k !== j && x.rid), kOtras = suma(otras).kcal;
+      const previa = diaPrevio && (diaPrevio.meals.find(x => x.slot === m.slot) || {}).rid;
+      const enDia = {}; otras.forEach(x => { enDia[x.rid] = true; });
+      const extra = r => 0.35*((usos[r.id]||0) - (r.id === m.rid ? 1 : 0)) + (previa === r.id ? 1 : 0) + (enDia[r.id] ? 1.5 : 0);
+      let mejor = {c:costeDia(meals) + 0.15*Math.abs(m.s - 1) + extra({id:m.rid}), m};
+      candidatas(m.slot).forEach(r => {
+        const s0 = clamp((obj.kcal - kOtras)/Math.max(r.kcal, 1), 0.5, 2);
+        [0, -0.1, 0.1].forEach(dl => {
+          const s = Math.round(clamp(s0 + dl, 0.5, 2)*20)/20, cand = comidaDe(r, m.slot, s);
+          const c = costeDia(otras.concat([cand])) + 0.15*Math.abs(s - 1) + extra(r);
+          if (c < mejor.c - 1e-9) mejor = {c, m:cand};
+        });
+      });
+      if (mejor.m !== m) { usos[m.rid] = Math.max((usos[m.rid]||1) - 1, 0); usos[mejor.m.rid] = (usos[mejor.m.rid]||0) + 1; meals[j] = mejor.m; mejoro = true; }
+    });
+    if (!mejoro) break;
+  }
 }
 /* Objetivo de cada comida de un día: las fijas no se tocan; el resto se reparte lo que queda. */
 function objetivosComidas(p, i, meals){
@@ -663,6 +697,7 @@ function lecturaRapida(ds, rs, kg, pal){
     const ico = pct >= 0.95 && pct <= 1.05 ? '✅' : (pct >= 0.9 && pct <= 1.1 ? '🟡' : '🔴');
     out.push(ico+' <b>'+N+'</b>: '+(Math.abs(pct-1) <= 0.05 ? 'bien cubierta' : dif < 0 ? 'faltan unos '+Math.abs(Math.round(dif))+' g al día ('+Math.round(pct*100)+' %)' : 'sobran unos '+Math.round(dif)+' g al día ('+Math.round(pct*100)+' %)')+'.');
   });
+  if (med('prot', fin) < 0.9*med('prot', d => d.obj)) out.push('💡 Para llegar a la proteína con las kcal del día hacen falta recetas más ricas en proteína (pescado, pollo, pavo, claras, yogur o queso fresco proteico) o un complemento. Añádelas al Recetario y vuelve a proponer el menú.');
   const malos = c.filter(d => { const p = fin(d).kcal/d.obj.kcal; return p < 0.9 || p > 1.1; });
   out.push((malos.length ? '🔴 Energía: '+malos.map(d => d.lbl.slice(0,3)+' '+Math.round(fin(d).kcal/d.obj.kcal*100)+' %').join(', ')+' se salen del ±10 %.' : '✅ Energía: todos los días con menú están dentro del ±10 % del objetivo.'));
   const cargas = c.filter(d => d.nivel >= 3 && fin(d).kcal < d.obj.kcal*0.95);
