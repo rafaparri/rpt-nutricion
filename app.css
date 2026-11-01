@@ -12,3 +12,6 @@
 .bigw{font-family:var(--font-title);font-size:38px;color:var(--t-accent2)}
 .hist{color:var(--t-muted2);font-size:var(--fs-small)}
 .empty{color:var(--t-muted2);text-align:center;padding:24px 8px}
+
+/* Las ventanas largas (formularios) deben poder desplazarse */
+.dlg{max-height:92vh;max-height:92dvh;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}

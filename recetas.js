@@ -32,6 +32,7 @@ function traducirIngles(t){
 
 function parecePasoPreparacion(linea){
   const texto = linea.trim(); if (!texto) return false;
+  if (colonAlFinal(texto) !== texto) return false; // "Ingrediente: cantidad" es un ingrediente, aunque sea largo
   const palabras = normalizar(texto).split(/\s+/).filter(Boolean); if (!palabras.length) return false;
   if (/^\d/.test(palabras[0])) return false;
   const primera = palabras[0];
@@ -76,8 +77,16 @@ function convertirNumeroTexto(t){
   for (const [frase, valor] of D.NUMEROS) if (n === frase || n.startsWith(frase + ' ')) return valor + t.slice(frase.length);
   return t;
 }
+const NUM_INICIO = /^(?:\d|medi[oa]\b|un[ao]?\b|dos\b|tres\b|cuatro\b|cinco\b|seis\b|siete\b|ocho\b|nueve\b|diez\b)/i;
+/* Formato "Huevo: 2 unidades" / "Aceite de oliva: 4 cucharadas" -> "2 unidades Huevo" */
+function colonAlFinal(t){
+  const m = t.match(/^([^:]+):\s*(.+)$/);
+  if (!m || !NUM_INICIO.test(m[2].trim())) return t;
+  const nombre = m[1].replace(/\([^)]*\)/g, '').trim();
+  return m[2].trim().replace(/^(\d+[.,]?\d*)\s*(?:unidades|unidad|uds?\.?)\s*/i, '$1 ') + ' ' + nombre;
+}
 function parseIngrediente(linea){
-  let t = linea.trim().replace(/^[-•*]\s*/, '');
+  let t = colonAlFinal(linea.trim().replace(/^[-•*]\s*/, ''));
   t = convertirNumeroTexto(t.trim());
   t = convertirFracciones(t.trim());
   const m = t.match(/^(\d+[.,]?\d*)\s*([a-zA-Záéíóúñ]*)\s*(?:de\s+)?(.*)$/);
