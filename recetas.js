@@ -307,5 +307,34 @@ async function leerDocx(arrayBuffer){
   return recetaDeLineas(lineasDocumento(xml));
 }
 
-window.RPT_RECETAS = { estimarMacros, categorizar, parseIngrediente, leerDocx, recetaDeLineas, parseLineas, lineasDocumento };
+/* ---- lista de la compra: una línea de ingrediente de UNA receta → datos agregables ---- */
+const CATS_COMPRA = [
+  ['Verduras y hortalizas', /tomate|lechuga|cebolla|ajo|pimiento|zanahoria|calabac|berenjena|espinaca|brocoli|coliflor|pepino|champi|seta|judia verde|puerro|calabaza|acelga|rucula|canonigo|esparrago|verdura|ensalada|apio|repollo|col\b|remolacha|guisante|patata|boniato|batata/],
+  ['Frutas', /manzana|platano|naranja|pera|fresa|kiwi|melon|sandia|uva|limon|lima\b|mandarina|melocoton|fruta|arandano|frambuesa|pina|mango|aguacate|cereza|ciruela|higo|datil|pasas/],
+  ['Carnes y pescados', /pollo|pavo|ternera|cerdo|lomo|jamon|cordero|carne|hamburguesa|salchicha|merluza|salmon|atun|bacalao|dorada|lubina|gamba|langostino|calamar|sepia|pescado|sardina|caballa|mejillon|almeja|pulpo|conejo|pechuga|solomillo|bonito/],
+  ['Lácteos y huevos', /leche|yogur|queso|huevo|nata|mantequilla|kefir|requeson|cuajada|clara|yema|skyr/],
+  ['Cereales, legumbres y pan', /arroz|pasta|macarron|espagueti|fideo|pan\b|avena|harina|cereal|lenteja|garbanzo|alubia|judias|quinoa|cuscus|tortita|tostada|galleta|tortilla de trigo|wrap|copos|muesli|legumbre|soja/],
+  ['Aceites, frutos secos y despensa', /aceite|nuez|nueces|almendra|anacardo|cacahuete|pistacho|avellana|semilla|chia|lino|sesamo|mantequilla de|crema de|miel|azucar|chocolate|cacao|salsa|vinagre|sal\b|especia|caldo|tomate frito|conserva/]
+];
+function categoriaCompra(nn){ for (const [c, re] of CATS_COMPRA) if (re.test(nn)) return c; return 'Otros'; }
+function ingredienteCompra(linea){
+  let [cantidad, unidad, nombre] = parseIngrediente(linea);
+  const nn = normalizar(nombre);
+  if (!nn || esIgnorable(nn)) return null;
+  const clave = buscarIngrediente(nn);
+  let gramos = null, uds = null;
+  if (clave !== null) {
+    const pesoU = FOOD_DB[clave][4];
+    if (cantidad === null) cantidad = 1;
+    if (unidad && Object.prototype.hasOwnProperty.call(UNIDADES, unidad)) gramos = cantidad * UNIDADES[unidad];
+    else { gramos = cantidad * pesoU; uds = cantidad; if (nn.indexOf('grande') >= 0) gramos *= 1.3; else if (nn.indexOf('pequen') >= 0) gramos *= 0.7; }
+    if (/aprox/i.test(linea)) { const g = gramosIndicados(linea); if (g) gramos = g; }
+  } else {
+    const g = gramosIndicados(linea); if (g) gramos = g; else if (cantidad !== null && !unidad) uds = cantidad;
+  }
+  const nombreBonito = capitalize(nombre.replace(/\s+/g, ' ').trim().replace(/[,;(].*$/, '').trim() || nombre.trim());
+  return { clave: clave !== null ? 'k:' + clave : 'n:' + nn.replace(/[,;(].*$/, '').trim(), nombre: nombreBonito, gramos, uds, cat: categoriaCompra(nn), suelto: gramos === null && uds === null };
+}
+
+window.RPT_RECETAS = { ingredienteCompra,  estimarMacros, categorizar, parseIngrediente, leerDocx, recetaDeLineas, parseLineas, lineasDocumento };
 })();

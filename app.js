@@ -125,10 +125,11 @@ function vPaciente(){
   const p = pacienteActual();
   if (!p) return '<div class="content"><div class="empty">Paciente no encontrado.</div></div>';
   const tabs = '<div class="tabs" role="tablist"><button role="tab" data-act="ptab" data-v="resumen" aria-selected="'+(S.ptab==='resumen')+'">Resumen</button>' +
-    '<button role="tab" data-act="ptab" data-v="semana" aria-selected="'+(S.ptab==='semana')+'">Semana</button></div>';
+    '<button role="tab" data-act="ptab" data-v="semana" aria-selected="'+(S.ptab==='semana')+'">Semana</button>' +
+    '<button role="tab" data-act="ptab" data-v="informe" aria-selected="'+(S.ptab==='informe')+'">Informe</button></div>';
   return '<div class="crumbs"><a href="#" data-act="volver">Pacientes</a> › <b>'+esc(p.name)+'</b></div><div class="content">' +
     '<button class="btn small secondary" style="width:fit-content" data-act="volver">‹ Volver</button><h1>'+esc(p.name)+'</h1>' + tabs +
-    (S.ptab==='resumen' ? vResumen(p) : vSemana(p)) + '</div>';
+    (S.ptab==='resumen' ? vResumen(p) : S.ptab==='semana' ? vSemana(p) : vInforme(p)) + '</div>';
 }
 function vResumen(p){
   const w = S.weights;
@@ -243,7 +244,7 @@ function calcDia(p, nivel, fecha, kg, comp){
   if ((kcal - 4*prot - 9*grasa)/4/kg < CARB_MIN_G_KG) grasa = Math.max(GRASA_MIN_G_KG*kg, (kcal - 4*prot - 4*CARB_MIN_G_KG*kg)/9);
   const carb = Math.max((kcal - 4*prot - 9*grasa)/4, 0);
   if (carb/kg < CARB_MIN_G_KG) nota += (nota ? ' · ' : '') + 'carbohidratos bajos';
-  return {kcal:Math.round(kcal/10)*10, prot:Math.round(prot), carb:Math.round(carb), grasa:Math.round(grasa), nota, carbKg:carb/kg};
+  return {kcal:Math.round(kcal/10)*10, prot:Math.round(prot), carb:Math.round(carb), grasa:Math.round(grasa), nota, carbKg:carb/kg, gasto:Math.round(mant/10)*10, reposo:Math.round(reposo)};
 }
 function vMacros(p){
   const lv = S.levels;
@@ -543,6 +544,248 @@ async function guardarReparto(){
   catch(e){ $('#rp_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
   render();
 }
+function cabSemana(){
+  const fin = sumaDias(S.weekStart, 6);
+  return '<div class="weekhead"><button class="btn secondary" data-act="semana" data-n="-7" aria-label="Semana anterior">‹</button>' +
+    '<div class="t">'+fechaCorta(S.weekStart).slice(0,5)+' – '+fechaCorta(fin).slice(0,5)+'</div>' +
+    '<button class="btn secondary" data-act="semana" data-n="7" aria-label="Semana siguiente">›</button></div>';
+}
+
+/* ---------- datos y gráficos de la semana ---------- */
+const PAL_APP = {txt:'#e8eef4', muted:'#b2bfcc', line:'#263242', track:'#263242', obj:'#5fe0d5', menu:'#34d1c4', real:'#ff8a65', gasto:'#b2bfcc', P:'#4f8cff', C:'#f2b84b', G:'#b07cf2'};
+const PAL_PDF = {txt:'#1b2430', muted:'#5b6b7e', line:'#d5dce4', track:'#e6ebf0', obj:'#0f8f85', menu:'#12a89c', real:'#e0623f', gasto:'#5b6b7e', P:'#2f6fe0', C:'#d99a1c', G:'#8a52d6'};
+const LVL_COL = ['#6fa8dc','#3fb26f','#f2b84b','#e0614f'];
+const fmtN = n => Math.round(n).toLocaleString('es-ES');
+function datosSemana(p){
+  const out = [];
+  for (let i = 0; i < 7; i++) {
+    const nivel = S.levels && S.levels[i];
+    const base = {i, lbl:DIAS[i], fecha:sumaDias(S.weekStart, i), nivel:nivel || 0, gasto:0, obj:null, menu:null, real:null, nota:''};
+    if (nivel && datosOk(p)) {
+      const r = calcDia(p, nivel, base.fecha, kgDe(), diasCompeticion(p.id));
+      base.gasto = r.gasto; base.nota = r.nota; base.obj = {kcal:r.kcal, prot:r.prot, carb:r.carb, fat:r.grasa};
+    }
+    const dia = S.menu && S.menu[i];
+    if (dia && dia.meals && dia.meals.some(m => m.rid)) { base.menu = totalDia(dia); if (hayReal(dia)) base.real = totalReal(dia); }
+    out.push(base);
+  }
+  return out;
+}
+function resumenSemana(ds){
+  const conObj = ds.filter(d => d.obj), conMenu = ds.filter(d => d.obj && d.menu);
+  const sum = (arr, f) => arr.reduce((a, d) => a + f(d), 0);
+  const final = d => d.real || d.menu;
+  return {
+    nObj:conObj.length, nMenu:conMenu.length,
+    objMedio: conObj.length ? sum(conObj, d => d.obj.kcal)/conObj.length : 0,
+    menuMedio: conMenu.length ? sum(conMenu, d => final(d).kcal)/conMenu.length : 0,
+    cobertura: conMenu.length ? sum(conMenu, d => final(d).kcal) / sum(conMenu, d => d.obj.kcal) : 0,
+    balance: conMenu.length ? sum(conMenu, d => final(d).kcal) - sum(conMenu, d => d.gasto) : 0,
+    gastoMedio: conMenu.length ? sum(conMenu, d => d.gasto)/conMenu.length : 0
+  };
+}
+function chartKcal(ds, pal){
+  const W = 340, H = 240, ml = 44, mr = 6, mt = 12, mb = 44;
+  const real = ds.some(d => d.real);
+  const vals = []; ds.forEach(d => { vals.push(d.gasto, d.obj ? d.obj.kcal : 0, d.menu ? d.menu.kcal : 0, d.real ? d.real.kcal : 0); });
+  const max = Math.max(500, Math.ceil(Math.max.apply(null, vals)/500)*500);
+  const gw = (W-ml-mr)/7, nb = real ? 3 : 2, bw = Math.min(14, (gw-6)/nb), y = v => mt + (H-mt-mb) * (1 - v/max);
+  let g = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Energía por día: gasto estimado, objetivo y menú" style="display:block;font-family:Archivo,system-ui,sans-serif">';
+  for (let v = 0; v <= max; v += 500) g += '<line x1="'+ml+'" x2="'+(W-mr)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="'+pal.line+'"/><text x="'+(ml-6)+'" y="'+(y(v)+4)+'" font-size="12" text-anchor="end" fill="'+pal.muted+'">'+v+'</text>';
+  ds.forEach((d, k) => {
+    const x0 = ml + k*gw + (gw - nb*bw - (nb-1)*2)/2;
+    if (d.obj) g += '<rect x="'+x0+'" y="'+y(d.obj.kcal)+'" width="'+bw+'" height="'+(y(0)-y(d.obj.kcal))+'" fill="none" stroke="'+pal.obj+'" stroke-width="2" rx="2"/>';
+    if (d.menu) g += '<rect x="'+(x0+bw+2)+'" y="'+y(d.menu.kcal)+'" width="'+bw+'" height="'+(y(0)-y(d.menu.kcal))+'" fill="'+pal.menu+'" rx="2"/>';
+    if (real && d.real) g += '<rect x="'+(x0+2*(bw+2))+'" y="'+y(d.real.kcal)+'" width="'+bw+'" height="'+(y(0)-y(d.real.kcal))+'" fill="'+pal.real+'" rx="2"/>';
+    if (d.gasto) g += '<line x1="'+(ml+k*gw+2)+'" x2="'+(ml+(k+1)*gw-2)+'" y1="'+y(d.gasto)+'" y2="'+y(d.gasto)+'" stroke="'+pal.gasto+'" stroke-width="2.5" stroke-dasharray="4 3"/>';
+    g += '<text x="'+(ml+k*gw+gw/2)+'" y="'+(H-22)+'" font-size="13" font-weight="700" text-anchor="middle" fill="'+pal.txt+'">'+d.lbl.charAt(0)+'</text>';
+    if (d.nivel) g += '<rect x="'+(ml+k*gw+gw/2-7)+'" y="'+(H-14)+'" width="14" height="6" rx="3" fill="'+LVL_COL[d.nivel-1]+'"/>';
+  });
+  return g + '</svg>';
+}
+function leyenda(items, pal){
+  return '<div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin:6px 0 2px;font-size:14px;color:'+pal.muted+'">' + items.map(([t, c, tipo]) =>
+    '<span style="display:inline-flex;align-items:center;gap:6px"><i style="display:inline-block;width:16px;height:'+(tipo==='linea'?'0':'10px')+';'+(tipo==='hueco' ? 'border:2px solid '+c : tipo==='linea' ? 'border-top:3px dashed '+c : 'background:'+c)+';border-radius:3px"></i>'+t+'</span>').join('') + '</div>';
+}
+function barrasMacros(ds, pal, kg){
+  const c = ds.filter(d => d.obj && d.menu); if (!c.length) return '<p class="sub">Prepara el menú para ver los macros.</p>';
+  const med = (f, k) => c.reduce((a, d) => a + f(d)[k], 0) / c.length;
+  const filas = [['Proteína','prot','P'],['Carbohidratos','carb','C'],['Grasa','fat','G']].map(([n, k, col]) => {
+    const o = med(d => d.obj, k), m = med(d => d.menu, k), r = c.some(d => d.real) ? med(d => d.real || d.menu, k) : null;
+    const pct = o ? m/o*100 : 0, ok = pct >= 90 && pct <= 110;
+    const bar = (v, color) => '<div style="height:12px;border-radius:6px;background:'+pal.track+';position:relative;margin:3px 0"><div style="height:12px;border-radius:6px;background:'+color+';width:'+Math.min(v/(o*1.3||1)*100, 100)+'%"></div><div style="position:absolute;left:'+(100/1.3)+'%;top:-3px;bottom:-3px;border-left:2px solid '+pal.txt+'"></div></div>';
+    return '<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:16px;color:'+pal.txt+'"><b style="color:'+pal[col]+'">'+n+'</b><span>'+Math.round(m)+' de '+Math.round(o)+' g/día · <b>'+Math.round(pct)+'%</b>'+(ok ? ' ✓' : '')+'</span></div>' +
+      bar(m, pal[col]) + (r !== null ? '<div style="font-size:14px;color:'+pal.muted+'">Real: '+Math.round(r)+' g/día ('+Math.round(o ? r/o*100 : 0)+'%)</div>' : '') +
+      '<div style="font-size:14px;color:'+pal.muted+'">'+(kg ? kgTxt(Math.round(o/kg*10)/10)+' g/kg necesarios · '+kgTxt(Math.round(m/kg*10)/10)+' g/kg en el menú' : '')+'</div></div>';
+  }).join('');
+  return filas + '<p style="font-size:14px;color:'+pal.muted+';margin:0">La raya vertical marca el 100% del objetivo. Medias de los días con menú.</p>';
+}
+function chartMacrosDia(ds, pal){
+  const W = 340, H = 240, ml = 44, mr = 6, mt = 12, mb = 44;
+  const tot = m => m.prot*4 + m.carb*4 + m.fat*9;
+  const vals = []; ds.forEach(d => { if (d.obj) vals.push(tot(d.obj)); if (d.menu) vals.push(tot(d.menu)); });
+  const max = Math.max(500, Math.ceil(Math.max.apply(null, vals.concat([0]))/500)*500);
+  const gw = (W-ml-mr)/7, bw = Math.min(15, (gw-5)/2), y = v => mt + (H-mt-mb) * (1 - v/max);
+  let g = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Macros por día: objetivo y menú" style="display:block;font-family:Archivo,system-ui,sans-serif">';
+  for (let v = 0; v <= max; v += 500) g += '<line x1="'+ml+'" x2="'+(W-mr)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="'+pal.line+'"/><text x="'+(ml-6)+'" y="'+(y(v)+4)+'" font-size="12" text-anchor="end" fill="'+pal.muted+'">'+v+'</text>';
+  const pila = (m, x, hueco) => { let base = 0, out = '';
+    [['prot',4,'P'],['carb',4,'C'],['fat',9,'G']].forEach(([k, f, col]) => { const h = m[k]*f; out += '<rect x="'+x+'" y="'+y(base+h)+'" width="'+bw+'" height="'+Math.max(y(base)-y(base+h), 0)+'" fill="'+pal[col]+'" opacity="'+(hueco ? 0.38 : 1)+'"/>'; base += h; });
+    return out; };
+  ds.forEach((d, k) => {
+    const x0 = ml + k*gw + (gw - 2*bw - 2)/2;
+    if (d.obj) g += pila(d.obj, x0, true);
+    if (d.menu) g += pila(d.real || d.menu, x0 + bw + 2, false);
+    g += '<text x="'+(ml+k*gw+gw/2)+'" y="'+(H-22)+'" font-size="13" font-weight="700" text-anchor="middle" fill="'+pal.txt+'">'+d.lbl.charAt(0)+'</text>';
+    if (d.nivel) g += '<rect x="'+(ml+k*gw+gw/2-7)+'" y="'+(H-14)+'" width="14" height="6" rx="3" fill="'+LVL_COL[d.nivel-1]+'"/>';
+  });
+  return g + '</svg>';
+}
+function tablaCifras(ds, pal){
+  const f = (v) => v ? fmtN(v.kcal) : '–';
+  const hayR = ds.some(d => d.real);
+  return '<table style="width:100%;border-collapse:collapse;font-size:15px;color:'+pal.txt+'"><thead><tr style="text-align:right;color:'+pal.muted+'"><th style="text-align:left;padding:4px 0">Día</th><th>Gasto</th><th>Objetivo</th><th>Menú</th>'+(hayR ? '<th>Real</th>' : '')+'</tr></thead><tbody>' +
+    ds.map(d => '<tr style="border-top:1px solid '+pal.line+';text-align:right"><td style="text-align:left;padding:5px 0"><b>'+d.lbl.slice(0,3)+'</b> <span style="color:'+(d.nivel ? LVL_COL[d.nivel-1] : pal.muted)+'">'+(d.nivel ? NIVELES[d.nivel-1] : '—')+'</span></td><td>'+(d.gasto ? fmtN(d.gasto) : '–')+'</td><td>'+f(d.obj)+'</td><td>'+f(d.menu)+'</td>'+(hayR ? '<td>'+f(d.real)+'</td>' : '')+'</tr>').join('') + '</tbody></table>';
+}
+function kpi(t, v, sub, color){
+  return '<div style="flex:1 1 140px;background:var(--t-bg2);border:1px solid var(--t-line);border-radius:14px;padding:10px 12px"><div style="font-size:14px;color:var(--t-muted)">'+t+'</div><div style="font:800 24px var(--font);color:'+(color||'var(--t-text)')+'">'+v+'</div>'+(sub ? '<div style="font-size:14px;color:var(--t-muted)">'+sub+'</div>' : '')+'</div>';
+}
+async function guardarNotas(){
+  const v = ($('#notas') && $('#notas').value) || '';
+  S.notas = v;
+  try { await refPac(S.pid).collection('weeks').doc(S.weekStart).set({notes:v, updatedAt:firebase.firestore.FieldValue.serverTimestamp()}, {merge:true}); setMsg('Notas guardadas.', true); }
+  catch(e){ setMsg('No se pudieron guardar las notas ('+((e && (e.code||e.message)) || 'error')+').', false); }
+  render();
+}
+/* ---------- lista de la compra ---------- */
+const ORDEN_CAT = ['Verduras y hortalizas','Frutas','Carnes y pescados','Lácteos y huevos','Cereales, legumbres y pan','Aceites, frutos secos y despensa','Otros'];
+function compraSemana(){
+  const ing = {}, platos = {};
+  (S.menu || []).forEach(dia => (dia && dia.meals || []).forEach(m => {
+    if (!m.rid) return;
+    const r = recetaPorId(m.rid); if (!r) return;
+    platos[r.name] = (platos[r.name] || 0) + 1;
+    const f = (m.s || 1) / Math.max(r.servings || 1, 1);
+    // los ingredientes de la receta están escritos para TODAS las raciones; la comida usa m.s raciones
+    (r.ingredients || []).forEach(l => {
+      const x = window.RPT_RECETAS.ingredienteCompra(l); if (!x) return;
+      const a = ing[x.clave] || (ing[x.clave] = {nombre:x.nombre, cat:x.cat, gramos:0, uds:0, veces:0, suelto:false});
+      a.veces++; if (x.gramos !== null) a.gramos += x.gramos * f; if (x.uds !== null) a.uds += x.uds * f; if (x.suelto) a.suelto = true;
+    });
+  }));
+  const grupos = {};
+  Object.keys(ing).forEach(k => { const a = ing[k]; (grupos[a.cat] || (grupos[a.cat] = [])).push(Object.assign({k}, a)); });
+  return ORDEN_CAT.filter(c => grupos[c]).map(c => ({cat:c, items:grupos[c].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))}));
+}
+function cantCompra(a){
+  const parts = [];
+  if (a.gramos > 0) parts.push(a.gramos >= 1000 ? (Math.round(a.gramos/100)/10).toLocaleString('es-ES')+' kg' : (Math.round(a.gramos/5)*5)+' g');
+  if (a.uds > 0 && a.gramos > 0 && a.uds < 40) parts.push('≈ '+(Math.round(a.uds*2)/2).toLocaleString('es-ES')+' uds');
+  else if (a.uds > 0 && !(a.gramos > 0)) parts.push((Math.round(a.uds*2)/2).toLocaleString('es-ES')+' uds');
+  return parts.join(' · ') || 'al gusto';
+}
+function compraOk(){ try { return JSON.parse(localStorage.getItem('nu_compra_'+S.pid+'_'+S.weekStart) || '{}'); } catch(e){ return {}; } }
+function toggleCompra(k){ const o = compraOk(); if (o[k]) delete o[k]; else o[k] = 1; try { localStorage.setItem('nu_compra_'+S.pid+'_'+S.weekStart, JSON.stringify(o)); } catch(e){} render(); }
+function vCompra(pdf){
+  const gr = compraSemana(); if (!gr.length) return '';
+  const ok = pdf ? {} : compraOk();
+  const nTot = gr.reduce((a, g) => a + g.items.length, 0), nOk = Object.keys(ok).filter(k => gr.some(g => g.items.some(i => i.k === k))).length;
+  return '<div class="card"><h3>Lista de la compra</h3>' + (pdf ? '' : '<p class="sub" style="margin-bottom:8px">Calculada con las recetas del menú de esta semana y las raciones de cada comida. Toca un producto para tacharlo ('+nOk+' de '+nTot+').</p>') +
+    gr.map(g => '<h4 style="margin:12px 0 4px;font-size:'+(pdf ? 14 : 17)+'px;color:'+(pdf ? '#0f8f85' : 'var(--t-accent)')+'">'+g.cat+'</h4><div'+(pdf ? '' : ' class="list"')+'>' + g.items.map(i =>
+      pdf ? '<div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-bottom:1px solid #e6ebf0;font-size:13px"><span>☐ '+esc(i.nombre)+'</span><b>'+cantCompra(i)+'</b></div>'
+          : '<button class="row" data-act="chkCompra" data-k="'+esc(i.k)+'" style="'+(ok[i.k] ? 'opacity:.5;text-decoration:line-through' : '')+'"><span style="font-size:22px;margin-right:10px">'+(ok[i.k] ? '☑' : '☐')+'</span><div class="grow"><b style="font-size:17px">'+esc(i.nombre)+'</b></div><b style="font-size:17px;white-space:nowrap">'+cantCompra(i)+'</b></button>').join('') + '</div>').join('') + '</div>';
+}
+/* ---------- informe de la semana (PDF) ---------- */
+const EXTRA_HIDRA = {1:200, 2:500, 3:600, 4:900};
+function pautasAuto(p, ds, rs){
+  const kg = kgDe(), obj = tipoObjetivo(p), out = [];
+  const niv = [...new Set(ds.filter(d => d.nivel).map(d => d.nivel))].sort();
+  out.push('<b>Hidratación:</b> '+niv.map(n => NIVELES[n-1]+' '+((kg*35 + EXTRA_HIDRA[n])/1000).toFixed(1).replace('.', ',')+' L').join(' · ')+' (35 ml por kg de peso más un extra según la intensidad del día). Orientativo: el color de la orina y la sed ayudan a ajustar.');
+  out.push('<b>Reparto de la proteína:</b> objetivo de 2 g por kg ('+Math.round(2*kg)+' g al día), repartida entre todas las comidas del día para mantener masa muscular.');
+  if (ds.some(d => d.nivel >= 3)) out.push('<b>Días de carga (Media y Alta):</b> se come al nivel del gasto, sin déficit. Concentra los hidratos en la comida previa al entreno (2–3 h antes) y en la posterior; evita las grasas y la fibra en exceso justo antes de entrenar.');
+  if (obj === 'bajar') out.push('<b>Pérdida de peso:</b> el déficit (−15 %) solo se aplica en los días de Descanso y Baja. Nunca se recorta la comida de los días de entreno Medio o Alto ni los de competición: bajar de peso no puede restar fuerza ni energía al entreno.');
+  if (obj === 'subir') out.push('<b>Aumento de peso:</b> se suma un superávit del 10 % sobre el gasto estimado. Si el peso no sube tras 2–3 semanas, sube las raciones de los hidratos.');
+  const fin = sumaDias(S.weekStart, 6), cs = compsDe(p).filter(c => c.date >= S.weekStart && c.date <= fin);
+  cs.forEach(c => out.push('<b>Competición — '+esc(c.name)+' ('+fechaCorta(c.date)+(c.weighIn ? ', pesaje '+esc(c.weighIn) : '')+(c.start ? ', inicio '+esc(c.start) : '')+'):</b> sin déficit el día anterior ni el de la competición, nada de alimentos nuevos, comidas de fácil digestión y un buen aporte de hidratos y líquidos.'));
+  if (ds.some(d => d.nota && d.nota.indexOf('carbohidratos bajos') >= 0)) out.push('<b>Atención:</b> algún día queda con carbohidratos por debajo de 3 g/kg; revisa las raciones o el objetivo.');
+  out.push('<b>Seguimiento:</b> pésate en ayunas, a la misma hora, y valora la tendencia semanal, no el dato de un día. Si se sube o baja demasiado rápido, hay que reajustar las raciones.');
+  return out;
+}
+function explicacionSemana(p, ds, rs){
+  const kg = kgDe(), obj = tipoObjetivo(p), n = k => ds.filter(d => d.nivel === k).length;
+  const ent = n(3) + n(4), trozos = [];
+  trozos.push('Esta semana tiene <b>'+ent+' día'+(ent === 1 ? '' : 's')+' de entreno exigente</b> ('+n(4)+' Alto y '+n(3)+' Medio), '+n(2)+' de intensidad Baja y '+n(1)+' de Descanso.');
+  const reposo = ds.find(d => d.nivel) ? calcDia(p, ds.find(d => d.nivel).nivel, ds.find(d => d.nivel).fecha, kg, diasCompeticion(p.id)).reposo : 0;
+  trozos.push('El gasto estimado parte del metabolismo en reposo ('+fmtN(reposo)+' kcal, fórmula de Mifflin-St Jeor con '+kgTxt(kg)+' kg) multiplicado por un factor según el nivel del día: 1,2 · 1,375 · 1,55 · 1,725 (Descanso, Baja, Media, Alta).');
+  trozos.push(obj === 'bajar' ? 'Como el objetivo es bajar peso, el déficit solo se aplica en los días de Descanso y Baja; en los días Medio, Alto y de competición se come lo que se gasta, de modo que el entreno no pierde energía.' : obj === 'subir' ? 'Como el objetivo es ganar peso, se añade un superávit del 10 % a todos los días.' : 'Como el objetivo es mantener, el objetivo diario coincide con el gasto estimado.');
+  trozos.push('Los macros se calculan así: proteína 2 g/kg, grasa 1 g/kg (hasta 0,7 g/kg si hace falta) y el resto en carbohidratos, protegiendo un mínimo de 3 g/kg para el entreno.');
+  if (rs.nMenu) trozos.push('El menú planificado aporta de media <b>'+fmtN(rs.menuMedio)+' kcal/día frente a un objetivo de '+fmtN(rs.objMedio)+'</b> (<b>'+Math.round(rs.cobertura*100)+' %</b> cubierto). Frente al gasto estimado, el balance semanal es de <b>'+(rs.balance >= 0 ? '+' : '−')+fmtN(Math.abs(rs.balance))+' kcal</b> (≈ '+(rs.balance >= 0 ? '+' : '−')+Math.round(Math.abs(rs.balance)/7.7)+' g de grasa).');
+  return trozos.map(t => '<p>'+t+'</p>').join('');
+}
+function tablaMenuPdf(p){
+  const slots = []; (S.menu || []).forEach(d => (d && d.meals || []).forEach(m => { if (slots.indexOf(m.slot) < 0) slots.push(m.slot); }));
+  const celda = (i, sl) => { const d = S.menu[i]; const m = d && d.meals && d.meals.find(x => x.slot === sl); if (!m || !m.rid) return '<td style="color:#8b98a8">–</td>';
+    const v = valsComida(m);
+    return '<td><b>'+esc(m.name)+'</b>'+(m.fija ? ' 📌' : '')+'<br><span class="mut">×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+' · '+Math.round(v.kcal)+' kcal</span></td>'; };
+  const cab = DIAS.map((d, i) => '<th>'+d.slice(0,3)+'<br><span style="font-weight:600;color:'+(S.levels && S.levels[i] ? LVL_COL[S.levels[i]-1] : '#5b6b7e')+'">'+(S.levels && S.levels[i] ? NIVELES[S.levels[i]-1] : '—')+'</span></th>').join('');
+  const filas = slots.map(sl => '<tr><th class="sl">'+esc(sl)+'</th>'+DIAS.map((d, i) => celda(i, sl)).join('')+'</tr>').join('');
+  const tot = '<tr class="tot"><th class="sl">Total</th>'+DIAS.map((d, i) => { const dia = S.menu[i], o = objetivoDia(p, i); if (!dia || !dia.meals || !dia.meals.some(m => m.rid)) return '<td>–</td>'; const t = totalDia(dia);
+    return '<td><b>'+Math.round(t.kcal)+' kcal</b><br><span class="mut">P '+Math.round(t.prot)+' · C '+Math.round(t.carb)+' · G '+Math.round(t.fat)+'</span>'+(o ? '<br><span class="mut">obj. '+o.kcal+'</span>' : '')+'</td>'; }).join('')+'</tr>';
+  return '<div style="overflow-x:auto"><table class="mtab"><thead><tr><th class="sl"></th>'+cab+'</tr></thead><tbody>'+filas+tot+'</tbody></table></div>';
+}
+function cambiosPdf(){
+  const filas = [];
+  (S.menu || []).forEach((dia, i) => (dia && dia.meals || []).forEach(m => { if (!m.rid || !m.real) return;
+    const a = valsComida(m), b = valsReal(m);
+    filas.push('<tr><td><b>'+DIAS[i].slice(0,3)+'</b> · '+esc(m.slot)+'</td><td>'+esc(m.name)+'<br><span class="mut">'+Math.round(a.kcal)+' kcal · P '+r1(a.prot)+' · C '+r1(a.carb)+' · G '+r1(a.fat)+'</span></td><td>'+(m.real.none ? '<i>No comió nada</i>' : esc(m.real.name))+'<br><span class="mut">'+Math.round(b.kcal)+' kcal · P '+r1(b.prot)+' · C '+r1(b.carb)+' · G '+r1(b.fat)+'</span></td><td>'+txtVariacion(a, b)+'</td></tr>'); }));
+  if (!filas.length) return '';
+  return '<section><h2>Cambios sobre la marcha</h2><table class="ctab"><thead><tr><th>Comida</th><th>Planificado</th><th>Comido</th><th>Variación</th></tr></thead><tbody>'+filas.join('')+'</tbody></table></section>';
+}
+function vPdf(p){
+  if (!datosOk(p) || !S.levels || !S.levels.some(x => x)) return '';
+  const ds = datosSemana(p), rs = resumenSemana(ds), kg = kgDe(), fin = sumaDias(S.weekStart, 6), hayR = ds.some(d => d.real);
+  const edad = new Date().getFullYear() - p.birthYear;
+  let h = '<div class="pdfdoc"><div class="pdfbar"><button class="btn secondary" data-act="pdfCerrar">‹ Cerrar</button><button class="btn" data-act="pdfImprimir">🖨️ Imprimir / Guardar PDF</button></div><div class="pdfpage">';
+  h += '<header><div><div class="brand">RPT Nutrición · Informe semanal</div><h1>'+esc(p.name)+'</h1><div class="mut">'+esc(p.sex || '')+' · '+edad+' años · '+p.heightCm+' cm · '+kgTxt(kg)+' kg'+(p.goal ? ' · Objetivo: '+esc(p.goal) : '')+'</div></div>' +
+    '<div class="wk"><b>Semana</b><br>'+fechaCorta(S.weekStart)+' – '+fechaCorta(fin)+'</div></header>';
+  h += '<section><h2>Cómo cuadra el menú con la semana de entreno</h2>'+explicacionSemana(p, ds, rs)+'</section>';
+  if (rs.nMenu) {
+    h += '<section><h2>Resumen</h2><div class="kpis"><div><span>Objetivo medio</span><b>'+fmtN(rs.objMedio)+' kcal</b></div><div><span>Menú medio</span><b>'+fmtN(rs.menuMedio)+' kcal</b></div><div><span>Cubierto</span><b>'+Math.round(rs.cobertura*100)+' %</b></div><div><span>Balance semanal</span><b>'+(rs.balance >= 0 ? '+' : '−')+fmtN(Math.abs(rs.balance))+' kcal</b></div></div>' +
+      '<div class="g2"><div><h3>Energía por día (kcal)</h3>'+chartKcal(ds, PAL_PDF)+leyenda([['Gasto', PAL_PDF.gasto, 'linea'], ['Objetivo', PAL_PDF.obj, 'hueco'], ['Menú', PAL_PDF.menu], ...(hayR ? [['Real', PAL_PDF.real]] : [])], PAL_PDF)+'</div>' +
+      '<div><h3>Macros: necesarios y en el menú</h3>'+barrasMacros(ds, PAL_PDF, kg)+'</div></div>' +
+      '<div class="g2"><div><h3>Reparto de macros por día</h3>'+chartMacrosDia(ds, PAL_PDF)+leyenda([['Proteína', PAL_PDF.P], ['Carbohidratos', PAL_PDF.C], ['Grasa', PAL_PDF.G]], PAL_PDF)+'<p class="mut" style="font-size:11px">Tenue: objetivo · Intenso: menú.</p></div><div><h3>Cifras por día</h3>'+tablaCifras(ds, PAL_PDF)+'</div></div></section>';
+    h += '<section class="newpage"><h2>Menú de la semana</h2>'+tablaMenuPdf(p)+'</section>';
+    h += cambiosPdf();
+  } else h += '<section><p class="mut">Esta semana aún no tiene menú.</p></section>';
+  h += '<section><h2>Pautas a seguir</h2><ul>'+pautasAuto(p, ds, rs).map(x => '<li>'+x+'</li>').join('')+'</ul>' +
+    (S.notas && S.notas.trim() ? '<h3>Notas del nutricionista</h3><p style="white-space:pre-wrap">'+esc(S.notas.trim())+'</p>' : '')+'</section>';
+  const compra = vCompra(true); if (compra) h += '<section class="newpage">'+compra.replace('<div class="card">', '<div>').replace('<h3>Lista de la compra</h3>', '<h2>Lista de la compra</h2>')+'</section>';
+  h += '<footer>Generado el '+fechaCorta(iso(new Date()))+' con RPT Nutrición · Las cifras son estimaciones orientativas.</footer></div></div>';
+  return h;
+}
+function vInforme(p){
+  let h = cabSemana() + msgHtml();
+  if (!datosOk(p)) return h + '<div class="card"><p class="sub">Para calcular hace falta sexo, año de nacimiento, altura y un peso. Complétalo en Resumen.</p></div>';
+  if (!S.levels || !S.levels.some(x => x)) return h + '<div class="card"><p class="sub">Esta semana aún no tiene niveles de entreno. Ponlos en la pestaña Semana.</p></div>';
+  const ds = datosSemana(p), rs = resumenSemana(ds), kg = kgDe(), hayR = ds.some(d => d.real);
+  if (!rs.nMenu) return h + '<div class="card"><p class="sub">Esta semana aún no tiene menú. Propónlo en la pestaña Semana y aquí verás los gráficos.</p></div>';
+  const bal = rs.balance, grasa = Math.abs(bal)/7.7;
+  const colBal = Math.abs(bal) < 700 ? 'var(--t-good-fg)' : 'var(--t-chg-fg)';
+  h += '<div class="card"><h3>Resumen de la semana</h3><div style="display:flex;flex-wrap:wrap;gap:8px">' +
+    kpi('Objetivo medio', fmtN(rs.objMedio)+' kcal', 'por día') + kpi('Menú medio', fmtN(rs.menuMedio)+' kcal', (hayR ? 'con lo realmente comido' : 'por día')) +
+    kpi('Cubierto', Math.round(rs.cobertura*100)+'%', 'del objetivo', rs.cobertura >= 0.95 && rs.cobertura <= 1.05 ? 'var(--t-good-fg)' : 'var(--t-chg-fg)') +
+    kpi('Balance semanal', (bal >= 0 ? '+' : '−')+fmtN(Math.abs(bal))+' kcal', 'frente al gasto estimado (≈ '+(bal >= 0 ? '+' : '−')+Math.round(grasa)+' g de grasa)', colBal) + '</div></div>';
+  h += '<div class="card"><h3 style="margin-bottom:0">Carga energética por día</h3><p class="sub" style="margin-bottom:6px">kcal: gasto estimado, objetivo y menú'+(hayR ? ' y real' : '')+'.</p>' +
+    chartKcal(ds, PAL_APP) + leyenda([['Gasto estimado', PAL_APP.gasto, 'linea'], ['Objetivo', PAL_APP.obj, 'hueco'], ['Menú', PAL_APP.menu], ...(hayR ? [['Real', PAL_APP.real]] : [])], PAL_APP) +
+    '<div style="margin-top:10px">'+tablaCifras(ds, PAL_APP)+'</div></div>';
+  h += '<div class="card"><h3>Macros: necesarios y en el menú</h3>' + barrasMacros(ds, PAL_APP, kg) + '</div>';
+  h += '<div class="card"><h3 style="margin-bottom:0">Reparto de macros por día</h3><p class="sub" style="margin-bottom:6px">Cada día: objetivo (tenue) y menú (intenso), en kcal por macro.</p>' +
+    chartMacrosDia(ds, PAL_APP) + leyenda([['Proteína', PAL_APP.P], ['Carbohidratos', PAL_APP.C], ['Grasa', PAL_APP.G]], PAL_APP) + '</div>';
+  h += vCompra(false);
+  h += '<div class="card"><h3>Informe en PDF</h3><p class="sub" style="margin-bottom:8px">Notas para el paciente: aparecerán en el informe, junto a las pautas automáticas.</p>' +
+    '<div class="field"><label class="f" for="notas">Notas del nutricionista (esta semana)</label><textarea id="notas" rows="5" style="padding:12px 14px;line-height:1.4">'+esc(S.notas || '')+'</textarea></div>' +
+    '<div class="btn-row"><button class="btn secondary" data-act="guardarNotas">Guardar notas</button><button class="btn" data-act="pdfAbrir">📄 Ver informe</button></div></div>';
+  return h;
+}
 function vSemana(p){
   const lv = S.levels || [0,0,0,0,0,0,0];
   const fin = sumaDias(S.weekStart, 6);
@@ -550,9 +793,7 @@ function vSemana(p){
     '<div class="weekrow"><div class="day">'+d+'<span class="sub">'+fechaCorta(sumaDias(S.weekStart,i)).slice(0,5)+'</span></div><div class="levels">' +
     [1,2,3,4].map(l => '<button data-l="'+l+'" data-act="nivel" data-d="'+i+'" aria-pressed="'+(lv[i]===l)+'"><span class="bars"><i></i><i></i><i></i><i></i></span>'+NIVELES[l-1]+'</button>').join('') +
     '</div></div>').join('');
-  return vWorkOutSemana(p) + '<div class="weekhead"><button class="btn secondary" data-act="semana" data-n="-7" aria-label="Semana anterior">‹</button>' +
-    '<div class="t">'+fechaCorta(S.weekStart).slice(0,5)+' – '+fechaCorta(fin).slice(0,5)+'</div>' +
-    '<button class="btn secondary" data-act="semana" data-n="7" aria-label="Semana siguiente">›</button></div>' +
+  return vWorkOutSemana(p) + cabSemana() +
     msgHtml() +
     '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+vMacros(p)+vMenu(p);
 }
@@ -592,6 +833,7 @@ function render(){
   else {
     const cuerpo = S.pid ? vPaciente() : (S.tab==='recetario' ? vRecetario() : S.tab==='cuenta' ? vCuenta() : vPacientes());
     html = '<div class="app">'+topBar()+cuerpo+bottomNav()+'</div>';
+    if (S.pdf && S.pid) { const pp = pacienteActual(); if (pp) html += vPdf(pp); }
   }
   const ae = document.activeElement, enRoot = ae && $('#root').contains(ae);
   const antes = enRoot && ae.id, val = antes && ae.value;
@@ -671,6 +913,7 @@ async function cargarSemana(){
   const d = await refPac(S.pid).collection('weeks').doc(S.weekStart).get();
   S.levels = d.exists && Array.isArray(d.data().levels) ? d.data().levels : null;
   S.menu = d.exists && Array.isArray(d.data().menu) ? d.data().menu : null;
+  S.notas = d.exists && typeof d.data().notes === 'string' ? d.data().notes : '';
 }
 async function abrirPaciente(id){
   S.pid = id; S.ptab = 'resumen'; S.weights = []; S.levels = null; S.menu = null; S.weekStart = lunesISO(new Date()); setMsg(null);
@@ -1023,7 +1266,12 @@ document.addEventListener('click', e => {
     case 'cerrar': cerrarDlg(); break;
     case 'borrar': borrarPaciente(); break;
     case 'borrarSeguro': borrarSeguro(); break;
-    case 'ptab': S.ptab = t.dataset.v; setMsg(null); render(); if (S.ptab==='semana') cambiarSemana(0); break;
+    case 'guardarNotas': guardarNotas(); break;
+    case 'pdfAbrir': { const n = $('#notas'); if (n && n.value !== (S.notas || '')) { S.notas = n.value; guardarNotas(); } S.pdf = true; render(); window.scrollTo(0, 0); break; }
+    case 'pdfCerrar': S.pdf = false; render(); break;
+    case 'pdfImprimir': window.print(); break;
+    case 'chkCompra': toggleCompra(t.dataset.k); break;
+    case 'ptab': S.ptab = t.dataset.v; setMsg(null); render(); if (S.ptab==='semana' || S.ptab==='informe') cambiarSemana(0); break;
     case 'guardarPeso': guardarPeso(); break;
     case 'nivel': ponerNivel(parseInt(t.dataset.d,10), parseInt(t.dataset.l,10)); break;
     case 'semana': cambiarSemana(parseInt(t.dataset.n,10)); break;
