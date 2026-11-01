@@ -107,3 +107,6 @@
 }
 img.appicon{object-fit:cover;background:#0c0c0e;border:1px solid var(--t-accent-edge)}
 img.appicon.big{width:96px;height:96px;border-radius:24px}
+
+.avisos{display:flex;flex-wrap:wrap;gap:8px}
+.chip.aviso{background:var(--t-chg-bg);border:1.5px solid var(--t-chg);color:var(--t-chg-fg);min-height:44px;padding:0 14px;border-radius:999px;font:800 16px var(--font);cursor:pointer}
