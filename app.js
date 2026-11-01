@@ -44,15 +44,17 @@ function cargaDia(entries){
   let t = 0;
   (entries || []).forEach(e => {
     if (e.type && e.type !== 'exercise') return;
-    (e.sets || []).forEach(x => { const ser = Number(x.series)||1, reps = Number(x.reps)||1, kg = Number(x.kg)||0; t += ser*reps*(kg>0 ? kg : 10); });
+    (e.sets || []).forEach(x => { t += (Number(x.kg)||0) * (Number(x.series)||1) * (Number(x.reps)||1); });
   });
   return t;
 }
 // 1 Descanso (sin carga) · 2 Baja (menos de la mitad del día más duro) · 3 Media · 4 Alta (el día más duro)
 function nivelesDePlan(plan){
-  const c = DIAKEYS.map(k => cargaDia(plan && plan.days && plan.days[k]));
-  const max = Math.max.apply(null, c);
-  return c.map(x => x <= 0 ? 1 : (x >= 0.95*max ? 4 : (x >= 0.5*max ? 3 : 2)));
+  const dia = k => (plan && plan.days && plan.days[k]) || [];
+  const c = DIAKEYS.map(k => cargaDia(dia(k)));
+  const hay = DIAKEYS.map(k => dia(k).some(e => e.type === 'exercise'));
+  const max = Math.max.apply(null, c.concat([1]));
+  return c.map((x, i) => !hay[i] ? 1 : (x >= 0.95*max ? 4 : (x >= 0.5*max ? 3 : 2)));
 }
 // Aplica los días que el atleta pasó de uno a otro ("pasar el entreno del jueves al viernes")
 function planConMovimientos(plan, moves){
