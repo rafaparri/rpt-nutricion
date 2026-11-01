@@ -53,7 +53,7 @@
   .pdfpage .newpage{break-before:page}
   .pdfpage h2,.pdfpage h3{break-after:avoid}
   .pdfpage .g2 svg{max-height:74mm}
-  .pdfpage .menupage{page:menu;break-before:page;break-after:page}
+  .pdfpage .menupage{page:menu;break-before:page}
   .pdfpage .menupage .mtab{font-size:11px}
   .pdfpage .g2{grid-template-columns:1fr 1fr!important}.pdfpage .kpis{grid-template-columns:repeat(4,1fr)!important}
   .pdfpage .mtab{min-width:0!important;font-size:10px}
