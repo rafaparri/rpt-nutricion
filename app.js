@@ -33,6 +33,7 @@ const S = {
   weights:[], weekStart:lunesISO(new Date()), levels:null,
   links:[], requests:[], wo:{}, woPlanId:null, woMsg:null,
   recipes:[], sharedRecipes:[], rtab:'mias', rq:'', cola:[], rmsg:null,
+  menu:null, slot:null,
   msg:null, msgOk:false, busy:false
 };
 const refPac = pid => db.collection('nu_patients').doc(pid);
@@ -260,6 +261,133 @@ function vMacros(p){
   }).join('');
   return '<div class="card"><h3 style="margin-bottom:0">Calorías y macros</h3><p class="sub" style="margin-bottom:10px">Con '+kgTxt(kg)+' kg · objetivo: '+obj+'. '+(obj==='bajar' ? 'Solo hay déficit en Descanso y Baja; Media, Alta y competición van a mantenimiento.' : '')+'</p><div class="list">'+filas+'</div></div>';
 }
+/* ---------- menú semanal ----------
+   Cada día se reparte en comidas (porcentaje de las kcal y macros del día). Para cada comida se elige
+   la receta del recetario que mejor encaja y se ajusta la ración. Todo se puede cambiar a mano. */
+const REPARTO_DEF = [['Desayuno',25],['Media mañana',10],['Almuerzo',30],['Merienda',10],['Cena',25]];
+const repartoDe = p => (Array.isArray(p.reparto) && p.reparto.length === 5) ? REPARTO_DEF.map((x,i) => [x[0], Number(p.reparto[i])||0]) : REPARTO_DEF;
+function kgDe(){ return S.weights.length ? S.weights[0].kg : null; }
+function datosOk(p){ return !!(p.sex && p.birthYear && p.heightCm && kgDe()); }
+function objetivoDia(p, i){
+  if (!S.levels || !S.levels[i] || !datosOk(p)) return null;
+  const r = calcDia(p, S.levels[i], sumaDias(S.weekStart,i), kgDe(), diasCompeticion(p.id));
+  return {kcal:r.kcal, prot:r.prot, carb:r.carb, fat:r.grasa};
+}
+function aptaPara(r, slot){
+  const u = norm(r.useIn || '');
+  if (slot === 'Desayuno') return u.indexOf('desayun') >= 0;
+  if (slot === 'Almuerzo') return u.indexOf('almuerz') >= 0 || u.indexOf('comida') >= 0;
+  if (slot === 'Cena') return u.indexOf('cena') >= 0;
+  return u.indexOf('merienda') >= 0 || u.indexOf('media') >= 0 || u.indexOf('snack') >= 0 || u.indexOf('desayun') >= 0;
+}
+const clamp = (x, a, b) => Math.min(Math.max(x, a), b);
+function escalaPara(r, t){ return Math.round(clamp(t.kcal / Math.max(r.kcal, 1), 0.5, 2) * 20) / 20; }
+function puntua(r, t, usos, previa, delDia){
+  const s = escalaPara(r, t);
+  const e = Math.abs(r.prot*s - t.prot)/Math.max(t.prot, 10) + Math.abs(r.carb*s - t.carb)/Math.max(t.carb, 15) + Math.abs(r.fat*s - t.fat)/Math.max(t.fat, 8);
+  let h = 0; String(r.id).split('').forEach(c => h = (h*31 + c.charCodeAt(0)) % 997);
+  return e + 0.25*Math.abs(s - 1) + 0.35*(usos[r.id]||0) + (previa === r.id ? 1 : 0) + (delDia && delDia[r.id] ? 1.5 : 0) + (h % 7) * 0.01;
+}
+function comidaDe(r, slot, s){
+  return {slot, rid:r.id, name:r.name, s, bk:r.kcal||0, bp:r.prot||0, bc:r.carb||0, bf:r.fat||0, bw:r.weight||0};
+}
+const valsComida = m => ({kcal:m.bk*m.s, prot:m.bp*m.s, carb:m.bc*m.s, fat:m.bf*m.s, g:m.bw*m.s});
+function candidatas(slot){
+  const todas = S.recipes.filter(r => (r.kcal||0) > 0);
+  const aptas = todas.filter(r => aptaPara(r, slot));
+  return aptas.length ? aptas : todas;
+}
+async function guardarMenu(){
+  try { await refPac(S.pid).collection('weeks').doc(S.weekStart).set({menu:S.menu, updatedAt:firebase.firestore.FieldValue.serverTimestamp()}, {merge:true}); }
+  catch(e){ setMsg('No se pudo guardar el menú ('+((e && (e.code||e.message)) || 'error')+').', false); }
+}
+async function proponerMenu(){
+  const p = pacienteActual(); if (!p) return;
+  if (!S.recipes.length) { setMsg('Primero necesitas recetas en el Recetario.', false); render(); return; }
+  const rep = repartoDe(p), usos = {}, menu = [];
+  for (let i = 0; i < 7; i++) {
+    const obj = objetivoDia(p, i), meals = [], hoy = {};
+    if (obj) rep.forEach(([slot, pct]) => {
+      const t = {kcal:obj.kcal*pct/100, prot:obj.prot*pct/100, carb:obj.carb*pct/100, fat:obj.fat*pct/100};
+      const previa = menu[i-1] && (menu[i-1].meals.find(m => m.slot === slot) || {}).rid;
+      const mejor = candidatas(slot).map(r => ({r, sc:puntua(r, t, usos, previa, hoy)})).sort((a,b) => a.sc - b.sc)[0];
+      if (mejor) { usos[mejor.r.id] = (usos[mejor.r.id]||0) + 1; hoy[mejor.r.id] = true; meals.push(comidaDe(mejor.r, slot, escalaPara(mejor.r, t))); }
+      else meals.push({slot, rid:null});
+    });
+    menu.push({meals});
+  }
+  S.menu = menu; setMsg('Menú propuesto. Toca cualquier comida para cambiarla.', true); render(); await guardarMenu();
+}
+function totalDia(dia){
+  const t = {kcal:0, prot:0, carb:0, fat:0};
+  (dia.meals||[]).forEach(m => { if (m.rid) { const v = valsComida(m); t.kcal += v.kcal; t.prot += v.prot; t.carb += v.carb; t.fat += v.fat; } });
+  return t;
+}
+const r1 = x => kgTxt(Math.round(x*10)/10);
+function vMenu(p){
+  if (!S.levels || !S.levels.some(x => x)) return '';
+  if (!datosOk(p)) return '';
+  const hay = S.menu && S.menu.some(d => d.meals && d.meals.length);
+  let html = '<div class="card"><h3>Menú de la semana</h3>' +
+    '<p class="sub" style="margin-bottom:10px">'+(hay ? 'Toca una comida para cambiar la receta o la ración.' : 'La app propone una receta para cada comida, con la ración ajustada a las kcal y macros del día.')+'</p>' +
+    '<div class="btn-row"><button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Proponer de nuevo' : '✨ Proponer menú')+'</button><button class="btn secondary" data-act="repartoDlg">Reparto</button></div></div>';
+  if (!hay) return html;
+  html += DIAS.map((d, i) => {
+    const dia = S.menu[i]; if (!dia || !dia.meals || !dia.meals.length) return '';
+    const obj = objetivoDia(p, i), tot = totalDia(dia);
+    const filas = dia.meals.map((m, j) => {
+      if (!m.rid) return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b><p class="sub">Sin receta · toca para elegir</p></div><span class="chev">＋</span></button>';
+      const v = valsComida(m);
+      return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b> · '+esc(m.name)+
+        '<p class="sub">ración ×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+' · '+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p></div><span class="chev">›</span></button>';
+    }).join('');
+    return '<div class="card"><h3 style="margin-bottom:2px">'+d+' · '+NIVELES[S.levels[i]-1]+'</h3>' +
+      '<p class="sub" style="margin-bottom:8px">Total '+Math.round(tot.kcal)+' de '+(obj ? obj.kcal : '?')+' kcal · P '+Math.round(tot.prot)+'/'+(obj ? obj.prot : '?')+' · C '+Math.round(tot.carb)+'/'+(obj ? obj.carb : '?')+' · G '+Math.round(tot.fat)+'/'+(obj ? obj.fat : '?')+'</p>' +
+      '<div class="list">'+filas+'</div></div>';
+  }).join('');
+  return html;
+}
+function dlgSlot(){
+  const p = pacienteActual(), sl = S.slot; if (!p || !sl) return;
+  const dia = S.menu[sl.d], m = dia.meals[sl.m], obj = objetivoDia(p, sl.d);
+  const pct = (repartoDe(p).find(x => x[0] === m.slot) || [0,0])[1];
+  const t = obj ? {kcal:obj.kcal*pct/100, prot:obj.prot*pct/100, carb:obj.carb*pct/100, fat:obj.fat*pct/100} : null;
+  const usos = {}; S.menu.forEach(d => (d.meals||[]).forEach(x => { if (x.rid) usos[x.rid] = (usos[x.rid]||0) + 1; }));
+  const delDia = {}; dia.meals.forEach(x => { if (x.rid && x !== m) delDia[x.rid] = true; });
+  const cands = t ? candidatas(m.slot).map(r => ({r, sc:puntua(r, t, usos, null, delDia)})).sort((a,b) => a.sc - b.sc).slice(0, 10).map(x => x.r) : candidatas(m.slot).slice(0, 10);
+  let cabecera = '<h2>'+DIAS[sl.d]+' · '+esc(m.slot)+'</h2>';
+  if (t) cabecera += '<p class="sub" style="margin-bottom:12px">Objetivo de esta comida: '+Math.round(t.kcal)+' kcal · P '+Math.round(t.prot)+' · C '+Math.round(t.carb)+' · G '+Math.round(t.fat)+'</p>';
+  let actual = '';
+  if (m.rid) {
+    const v = valsComida(m);
+    actual = '<div class="card accent" style="margin-bottom:12px"><b>'+esc(m.name)+'</b><p class="sub" style="margin:4px 0 10px">'+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+'</p>' +
+      '<div class="btn-row"><button class="btn secondary" data-act="escalaSlot" data-n="-0.1" aria-label="Menos ración">− Ración</button><b style="align-self:center;text-align:center;min-width:64px">×'+kgTxt(Math.round(m.s*100)/100)+'</b><button class="btn secondary" data-act="escalaSlot" data-n="0.1" aria-label="Más ración">＋ Ración</button></div>' +
+      '<button class="btn danger" style="margin-top:10px" data-act="quitarSlot">Quitar esta comida</button></div>';
+  }
+  const lista = cands.length ? '<h3 style="margin:6px 0">Otras recetas</h3><div class="list">' + cands.filter(r => r.id !== m.rid).map(r => {
+    const s = t ? escalaPara(r, t) : 1;
+    return '<button class="row" data-act="elegirReceta" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(s)+' · '+Math.round(r.kcal*s)+' kcal · P '+r1(r.prot*s)+' · C '+r1(r.carb*s)+' · G '+r1(r.fat*s)+'</p></div><span class="chev">›</span></button>';
+  }).join('') + '</div>' : '<div class="empty">No hay recetas para esta comida. Añade recetas en el Recetario.</div>';
+  abrirDlg(cabecera + actual + lista + '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
+}
+async function cambiarSlot(fn){
+  const sl = S.slot; if (!sl) return;
+  fn(S.menu[sl.d].meals[sl.m]); dlgSlot(); render(); await guardarMenu();
+}
+function dlgReparto(){
+  const p = pacienteActual(); if (!p) return;
+  abrirDlg('<h2>Reparto de comidas</h2><p class="sub" style="margin-bottom:12px">Porcentaje de las kcal y macros del día para cada comida. Debe sumar 100.</p>' +
+    repartoDe(p).map((x, i) => '<div class="field"><label class="f" for="rp'+i+'">'+esc(x[0])+' (%)</label><input id="rp'+i+'" inputmode="numeric" value="'+x[1]+'"></div>').join('') +
+    '<div class="msg err" id="rp_msg"></div><div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn" data-act="guardarReparto">Guardar</button></div>');
+}
+async function guardarReparto(){
+  const p = pacienteActual(); if (!p) return;
+  const v = [0,1,2,3,4].map(i => parseInt($('#rp'+i).value, 10) || 0);
+  if (v.some(x => x < 0 || x > 100) || v.reduce((a,b) => a+b, 0) !== 100) { $('#rp_msg').textContent = 'Los porcentajes deben sumar 100 (ahora suman '+v.reduce((a,b) => a+b, 0)+').'; return; }
+  try { await refPac(p.id).update({reparto:v}); p.reparto = v; cerrarDlg(); setMsg('Reparto guardado. Vuelve a proponer el menú para aplicarlo.', true); }
+  catch(e){ $('#rp_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
+  render();
+}
 function vSemana(p){
   const lv = S.levels || [0,0,0,0,0,0,0];
   const fin = sumaDias(S.weekStart, 6);
@@ -270,7 +398,7 @@ function vSemana(p){
   return vWorkOutSemana(p) + '<div class="weekhead"><button class="btn secondary" data-act="semana" data-n="-7" aria-label="Semana anterior">‹</button>' +
     '<div class="t">'+fechaCorta(S.weekStart).slice(0,5)+' – '+fechaCorta(fin).slice(0,5)+'</div>' +
     '<button class="btn secondary" data-act="semana" data-n="7" aria-label="Semana siguiente">›</button></div>' +
-    '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+vMacros(p)+msgHtml();
+    '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+vMacros(p)+vMenu(p)+msgHtml();
 }
 function norm(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
 const macrosTxt = r => (r.kcal||0)+' kcal · P '+kgTxt(r.prot||0)+' · C '+kgTxt(r.carb||0)+' · G '+kgTxt(r.fat||0);
@@ -386,9 +514,10 @@ async function cargarPesos(){
 async function cargarSemana(){
   const d = await refPac(S.pid).collection('weeks').doc(S.weekStart).get();
   S.levels = d.exists && Array.isArray(d.data().levels) ? d.data().levels : null;
+  S.menu = d.exists && Array.isArray(d.data().menu) ? d.data().menu : null;
 }
 async function abrirPaciente(id){
-  S.pid = id; S.ptab = 'resumen'; S.weights = []; S.levels = null; S.weekStart = lunesISO(new Date()); setMsg(null);
+  S.pid = id; S.ptab = 'resumen'; S.weights = []; S.levels = null; S.menu = null; S.weekStart = lunesISO(new Date()); setMsg(null);
   render();
   const l0 = linkDe(id); if (l0 && l0.status === 'accepted') await leerWorkOut(id);
   try { await cargarPesos(); } catch(e){ setMsg('No se pudo leer el peso (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('pesos', e); }
@@ -430,7 +559,7 @@ async function ponerNivel(dia, nivel){
   catch(e){ setMsg('No se pudo guardar la semana. Inténtalo de nuevo.', false); render(); }
 }
 async function cambiarSemana(n){
-  S.weekStart = sumaDias(S.weekStart, n); S.levels = null; setMsg(null); render();
+  S.weekStart = sumaDias(S.weekStart, n); S.levels = null; S.menu = null; setMsg(null); render();
   try { await cargarSemana(); } catch(e){ setMsg('No se pudo leer la semana (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('semana', e); }
   render();
 }
@@ -731,6 +860,16 @@ document.addEventListener('click', e => {
     case 'semana': cambiarSemana(parseInt(t.dataset.n,10)); break;
     case 'recargar': recargar(); break;
     case 'vincular': dlgVinculo(); break;
+    case 'proponerMenu': proponerMenu(); break;
+    case 'repartoDlg': dlgReparto(); break;
+    case 'guardarReparto': guardarReparto(); break;
+    case 'slotMenu': S.slot = {d:parseInt(t.dataset.d,10), m:parseInt(t.dataset.m,10)}; dlgSlot(); break;
+    case 'escalaSlot': cambiarSlot(m => { m.s = Math.round(clamp(m.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }); break;
+    case 'quitarSlot': cambiarSlot(m => { m.rid = null; delete m.name; }); break;
+    case 'elegirReceta': { const r = recetaPorId(t.dataset.id); if (r) { const p = pacienteActual(); const sl = S.slot; const m0 = S.menu[sl.d].meals[sl.m];
+        const pct = (repartoDe(p).find(x => x[0] === m0.slot) || [0,0])[1], obj = objetivoDia(p, sl.d);
+        const s = obj ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
+        cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s))); } break; }
     case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
     case 'verReceta': dlgVerReceta(t.dataset.id); break;
     case 'nuevaReceta': S.cola = []; dlgFormReceta(null, 0); break;
