@@ -298,8 +298,11 @@ function candidatas(slot){
   return aptas.length ? aptas : todas;
 }
 async function guardarMenu(){
-  try { await refPac(S.pid).collection('weeks').doc(S.weekStart).set({menu:S.menu, updatedAt:firebase.firestore.FieldValue.serverTimestamp()}, {merge:true}); }
-  catch(e){ setMsg('No se pudo guardar el menú ('+((e && (e.code||e.message)) || 'error')+').', false); }
+  try {
+    const limpio = JSON.parse(JSON.stringify(S.menu));
+    await refPac(S.pid).collection('weeks').doc(S.weekStart).set({menu:limpio, updatedAt:firebase.firestore.FieldValue.serverTimestamp()}, {merge:true});
+    return true;
+  } catch(e){ setMsg('No se pudo guardar el menú ('+((e && (e.code||e.message)) || 'error')+'). Lo que ves no está guardado.', false); console.error('menu', e); render(); return false; }
 }
 async function proponerMenu(){
   const p = pacienteActual(); if (!p) return;
@@ -354,7 +357,9 @@ function dlgSlot(){
   const t = obj ? {kcal:obj.kcal*pct/100, prot:obj.prot*pct/100, carb:obj.carb*pct/100, fat:obj.fat*pct/100} : null;
   const usos = {}; S.menu.forEach(d => (d.meals||[]).forEach(x => { if (x.rid) usos[x.rid] = (usos[x.rid]||0) + 1; }));
   const delDia = {}; dia.meals.forEach(x => { if (x.rid && x !== m) delDia[x.rid] = true; });
-  const cands = t ? candidatas(m.slot).map(r => ({r, sc:puntua(r, t, usos, null, delDia)})).sort((a,b) => a.sc - b.sc).slice(0, 10).map(x => x.r) : candidatas(m.slot).slice(0, 10);
+  const q = norm(S.slotQ || '');
+  const base = q ? S.recipes.filter(r => (r.kcal||0) > 0 && norm([r.name, r.useIn, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0) : candidatas(m.slot);
+  const cands = (t ? base.map(r => ({r, sc:puntua(r, t, usos, null, delDia)})).sort((a,b) => a.sc - b.sc).map(x => x.r) : base).slice(0, q ? 30 : 10);
   let cabecera = '<h2>'+DIAS[sl.d]+' · '+esc(m.slot)+'</h2>';
   if (t) cabecera += '<p class="sub" style="margin-bottom:12px">Objetivo de esta comida: '+Math.round(t.kcal)+' kcal · P '+Math.round(t.prot)+' · C '+Math.round(t.carb)+' · G '+Math.round(t.fat)+'</p>';
   let actual = '';
@@ -364,15 +369,21 @@ function dlgSlot(){
       '<div class="btn-row"><button class="btn secondary" data-act="escalaSlot" data-n="-0.1" aria-label="Menos ración">− Ración</button><b style="align-self:center;text-align:center;min-width:64px">×'+kgTxt(Math.round(m.s*100)/100)+'</b><button class="btn secondary" data-act="escalaSlot" data-n="0.1" aria-label="Más ración">＋ Ración</button></div>' +
       '<button class="btn danger" style="margin-top:10px" data-act="quitarSlot">Quitar esta comida</button></div>';
   }
-  const lista = cands.length ? '<h3 style="margin:6px 0">Otras recetas</h3><div class="list">' + cands.filter(r => r.id !== m.rid).map(r => {
+  const buscador = '<div class="field"><label class="f" for="sq">Buscar receta</label><input id="sq" type="search" value="'+esc(S.slotQ||'')+'" placeholder="Nombre o ingrediente…" autocomplete="off"></div>';
+  const lista = buscador + (cands.length ? '<h3 style="margin:6px 0">'+(q ? 'Resultados' : 'Recetas que encajan')+'</h3><div class="list">' + cands.filter(r => r.id !== m.rid).map(r => {
     const s = t ? escalaPara(r, t) : 1;
     return '<button class="row" data-act="elegirReceta" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(s)+' · '+Math.round(r.kcal*s)+' kcal · P '+r1(r.prot*s)+' · C '+r1(r.carb*s)+' · G '+r1(r.fat*s)+'</p></div><span class="chev">›</span></button>';
-  }).join('') + '</div>' : '<div class="empty">No hay recetas para esta comida. Añade recetas en el Recetario.</div>';
+  }).join('') + '</div>' : '<div class="empty">'+(q ? 'Ninguna receta coincide.' : 'No hay recetas para esta comida. Añade recetas en el Recetario.')+'</div>');
   abrirDlg(cabecera + actual + lista + '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
 }
-async function cambiarSlot(fn){
+async function cambiarSlot(fn, cerrar, aviso){
   const sl = S.slot; if (!sl) return;
-  fn(S.menu[sl.d].meals[sl.m]); dlgSlot(); render(); await guardarMenu();
+  fn(S.menu[sl.d].meals[sl.m]);
+  if (cerrar) { cerrarDlg(); S.slotQ = ''; } else dlgSlot();
+  if (aviso) setMsg(aviso, true);
+  render();
+  const ok = await guardarMenu();
+  if (ok && aviso) { render(); }
 }
 function dlgReparto(){
   const p = pacienteActual(); if (!p) return;
@@ -398,7 +409,8 @@ function vSemana(p){
   return vWorkOutSemana(p) + '<div class="weekhead"><button class="btn secondary" data-act="semana" data-n="-7" aria-label="Semana anterior">‹</button>' +
     '<div class="t">'+fechaCorta(S.weekStart).slice(0,5)+' – '+fechaCorta(fin).slice(0,5)+'</div>' +
     '<button class="btn secondary" data-act="semana" data-n="7" aria-label="Semana siguiente">›</button></div>' +
-    '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+vMacros(p)+vMenu(p)+msgHtml();
+    msgHtml() +
+    '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+vMacros(p)+vMenu(p);
 }
 function norm(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
 const macrosTxt = r => (r.kcal||0)+' kcal · P '+kgTxt(r.prot||0)+' · C '+kgTxt(r.carb||0)+' · G '+kgTxt(r.fat||0);
@@ -863,13 +875,13 @@ document.addEventListener('click', e => {
     case 'proponerMenu': proponerMenu(); break;
     case 'repartoDlg': dlgReparto(); break;
     case 'guardarReparto': guardarReparto(); break;
-    case 'slotMenu': S.slot = {d:parseInt(t.dataset.d,10), m:parseInt(t.dataset.m,10)}; dlgSlot(); break;
+    case 'slotMenu': S.slotQ = ''; S.slot = {d:parseInt(t.dataset.d,10), m:parseInt(t.dataset.m,10)}; dlgSlot(); break;
     case 'escalaSlot': cambiarSlot(m => { m.s = Math.round(clamp(m.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }); break;
-    case 'quitarSlot': cambiarSlot(m => { m.rid = null; delete m.name; }); break;
+    case 'quitarSlot': cambiarSlot(m => { m.rid = null; delete m.name; }, true, 'Comida quitada.'); break;
     case 'elegirReceta': { const r = recetaPorId(t.dataset.id); if (r) { const p = pacienteActual(); const sl = S.slot; const m0 = S.menu[sl.d].meals[sl.m];
         const pct = (repartoDe(p).find(x => x[0] === m0.slot) || [0,0])[1], obj = objetivoDia(p, sl.d);
         const s = obj ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
-        cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s))); } break; }
+        cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s)), true, DIAS[sl.d]+' · '+m0.slot+': cambiado a '+r.name+'.'); } break; }
     case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
     case 'verReceta': dlgVerReceta(t.dataset.id); break;
     case 'nuevaReceta': S.cola = []; dlgFormReceta(null, 0); break;
@@ -893,7 +905,8 @@ document.addEventListener('click', e => {
     case 'proponer': proponer(); break;
   }
 });
-document.addEventListener('input', e => { if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
+document.addEventListener('input', e => {
+  if (e.target && e.target.id === 'sq') { S.slotQ = e.target.value; dlgSlot(); const n = $('#sq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; } if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
 document.addEventListener('change', e => {
   if (e.target && e.target.id === 'docxIn' && e.target.files.length) { importarDocx(e.target.files); e.target.value = ''; return; } if (e.target && e.target.id === 'woplan') S.woPlanId = e.target.value; });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && S.view === 'login' && e.target.id === 'pw') entrar(false); });
