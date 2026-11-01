@@ -179,6 +179,59 @@ function vWorkOutSemana(p){
     (comps.length ? '<p class="sub" style="margin-bottom:10px">'+comps.map(x => '🏆 '+esc(x.c.name||'Competición')+' · '+DIAS[(new Date(x.d+'T00:00').getDay()+6)%7]).join('<br>')+'</p>' : '') +
     '<button class="btn" data-act="proponer">Proponer niveles</button></div>';
 }
+/* ---------- calorías y macros ----------
+   Gasto en reposo: Mifflin-St Jeor. Gasto del día = reposo × factor del nivel de entreno.
+   Bajar peso: el déficit SOLO se aplica en Descanso y Baja, nunca en Media/Alta, ni el día
+   de competición ni el anterior, y nunca por debajo del gasto en reposo.
+   Subir peso: superávit en todos los días. */
+const FACTOR = [1.2, 1.375, 1.55, 1.725];   // Descanso, Baja, Media, Alta
+const DEFICIT = 0.15, SUPERAVIT = 0.10;
+const PROT_G_KG = 2.0, GRASA_G_KG = 1.0, GRASA_MIN_G_KG = 0.7, CARB_MIN_G_KG = 3.0;
+function tipoObjetivo(p){
+  if (p.goalType) return p.goalType;
+  const t = (p.goal || '').toLowerCase();
+  return /baj|adelgaz|perd|defin/.test(t) ? 'bajar' : /sub|gan|volumen|masa/.test(t) ? 'subir' : 'mantener';
+}
+function diasCompeticion(pid){
+  const w = S.wo[pid], out = {};
+  (w ? w.comps : []).forEach(c => { const d = c.day || c.startDate; if (d) { out[d] = true; out[sumaDias(d, -1)] = true; } });
+  return out;
+}
+function calcDia(p, nivel, fecha, kg, comp){
+  const edad = new Date().getFullYear() - p.birthYear;
+  const reposo = 10*kg + 6.25*p.heightCm - 5*edad + (p.sex === 'Hombre' ? 5 : -161);
+  const mant = reposo * FACTOR[nivel-1];
+  const obj = tipoObjetivo(p);
+  let kcal = mant, nota = '';
+  if (obj === 'bajar') {
+    if (nivel <= 2 && !comp[fecha]) { kcal = Math.max(mant*(1-DEFICIT), reposo); nota = 'déficit'; }
+    else nota = comp[fecha] ? 'competición: sin déficit' : 'sin déficit';
+  } else if (obj === 'subir') { kcal = mant*(1+SUPERAVIT); nota = 'superávit'; }
+  // Proteína fija. Grasa 1 g/kg, pero si así los carbohidratos quedan bajo 3 g/kg, la grasa baja
+  // (hasta 0,7 g/kg) para protegerlos: son el combustible del entreno.
+  const prot = PROT_G_KG*kg;
+  let grasa = GRASA_G_KG*kg;
+  if ((kcal - 4*prot - 9*grasa)/4/kg < CARB_MIN_G_KG) grasa = Math.max(GRASA_MIN_G_KG*kg, (kcal - 4*prot - 4*CARB_MIN_G_KG*kg)/9);
+  const carb = Math.max((kcal - 4*prot - 9*grasa)/4, 0);
+  if (carb/kg < CARB_MIN_G_KG) nota += (nota ? ' · ' : '') + 'carbohidratos bajos';
+  return {kcal:Math.round(kcal/10)*10, prot:Math.round(prot), carb:Math.round(carb), grasa:Math.round(grasa), nota, carbKg:carb/kg};
+}
+function vMacros(p){
+  const lv = S.levels;
+  if (!lv || !lv.some(x => x)) return '';
+  const falta = [];
+  if (!p.sex) falta.push('sexo'); if (!p.birthYear) falta.push('año de nacimiento'); if (!p.heightCm) falta.push('altura');
+  const kg = S.weights.length ? S.weights[0].kg : null;
+  if (!kg) falta.push('un peso');
+  if (falta.length) return '<div class="card"><h3>Calorías y macros</h3><p class="sub">Para calcularlos falta: '+falta.join(', ')+'. Complétalo en Resumen → Editar datos.</p></div>';
+  const comp = diasCompeticion(p.id), obj = tipoObjetivo(p);
+  const filas = DIAS.map((d,i) => {
+    if (!lv[i]) return '';
+    const r = calcDia(p, lv[i], sumaDias(S.weekStart,i), kg, comp);
+    return '<div class="row"><div class="grow"><b>'+d+' · '+NIVELES[lv[i]-1]+'</b><p class="sub">P '+r.prot+' g · C '+r.carb+' g · G '+r.grasa+' g'+(r.nota ? ' · '+r.nota : '')+'</p></div><b>'+r.kcal+' kcal</b></div>';
+  }).join('');
+  return '<div class="card"><h3 style="margin-bottom:0">Calorías y macros</h3><p class="sub" style="margin-bottom:10px">Con '+kgTxt(kg)+' kg · objetivo: '+obj+'. '+(obj==='bajar' ? 'Solo hay déficit en Descanso y Baja; Media, Alta y competición van a mantenimiento.' : '')+'</p><div class="list">'+filas+'</div></div>';
+}
 function vSemana(p){
   const lv = S.levels || [0,0,0,0,0,0,0];
   const fin = sumaDias(S.weekStart, 6);
@@ -189,7 +242,7 @@ function vSemana(p){
   return vWorkOutSemana(p) + '<div class="weekhead"><button class="btn secondary" data-act="semana" data-n="-7" aria-label="Semana anterior">‹</button>' +
     '<div class="t">'+fechaCorta(S.weekStart).slice(0,5)+' – '+fechaCorta(fin).slice(0,5)+'</div>' +
     '<button class="btn secondary" data-act="semana" data-n="7" aria-label="Semana siguiente">›</button></div>' +
-    '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+msgHtml();
+    '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+vMacros(p)+msgHtml();
 }
 function vRecetario(){
   return '<div class="crumbs"><b>Recetario</b></div><div class="content"><h1>Recetario</h1><div class="card"><p class="sub">Aquí estará el recetario compartido. Es la siguiente fase.</p></div></div>';
@@ -229,7 +282,8 @@ function dlgPaciente(p){
     '<div class="grid2"><div class="field"><label class="f" for="d_sex">Sexo</label><select id="d_sex">'+['','Mujer','Hombre'].map(o=>'<option'+(o===(v.sex||'')?' selected':'')+' value="'+o+'">'+(o||'—')+'</option>').join('')+'</select></div>' +
     '<div class="field"><label class="f" for="d_year">Año de nacimiento</label><input id="d_year" inputmode="numeric" value="'+esc(v.birthYear||'')+'"></div></div>' +
     '<div class="grid2"><div class="field"><label class="f" for="d_h">Altura (cm)</label><input id="d_h" inputmode="numeric" value="'+esc(v.heightCm||'')+'"></div>' +
-    '<div class="field"><label class="f" for="d_goal">Objetivo</label><input id="d_goal" value="'+esc(v.goal||'')+'" placeholder="Bajar, mantener…"></div></div>' +
+    '<div class="field"><label class="f" for="d_gt">Objetivo de peso</label><select id="d_gt">'+[['mantener','Mantener'],['bajar','Bajar'],['subir','Subir']].map(o=>'<option value="'+o[0]+'"'+(o[0]===tipoObjetivo(v)?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></div></div>' +
+    '<div class="field"><label class="f" for="d_goal">Objetivo (texto libre)</label><input id="d_goal" value="'+esc(v.goal||'')+'" placeholder="Opcional"></div>' +
     '<div class="field"><label class="f" for="d_notes">Notas</label><input id="d_notes" value="'+esc(v.notes||'')+'"></div>' +
     '<div class="msg err" id="d_msg"></div>' +
     '<div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn" data-act="guardarPaciente" data-id="'+esc(v.id||'')+'">Guardar</button></div>');
@@ -299,7 +353,7 @@ async function guardarPaciente(id){
   const h = num('d_h'), y = num('d_year');
   if (h !== null && (h < 80 || h > 250)){ $('#d_msg').textContent = 'La altura debe estar entre 80 y 250 cm.'; return; }
   if (y !== null && (y < 1900 || y > new Date().getFullYear())){ $('#d_msg').textContent = 'Año de nacimiento no válido.'; return; }
-  const datos = { name, sex:g('d_sex'), birthYear:y, heightCm:h, goal:g('d_goal'), notes:g('d_notes') };
+  const datos = { name, sex:g('d_sex'), birthYear:y, heightCm:h, goal:g('d_goal'), goalType:g('d_gt'), notes:g('d_notes') };
   try {
     if (id) await refPac(id).update(datos);
     else await db.collection('nu_patients').add(Object.assign({ownerUid:S.user.uid, linkedUid:null, createdAt:firebase.firestore.FieldValue.serverTimestamp()}, datos));
