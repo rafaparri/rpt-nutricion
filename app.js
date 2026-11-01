@@ -304,19 +304,37 @@ async function guardarMenu(){
     return true;
   } catch(e){ setMsg('No se pudo guardar el menú ('+((e && (e.code||e.message)) || 'error')+'). Lo que ves no está guardado.', false); console.error('menu', e); render(); return false; }
 }
+const fijaDe = (p, slot, i) => {
+  const f = p.fijas && p.fijas[slot];
+  if (!f || !f.rid || !Array.isArray(f.days) || f.days.indexOf(i) < 0) return null;
+  const r = S.recipes.find(x => x.id === f.rid);
+  return r ? {r, s:Number(f.s) > 0 ? Number(f.s) : 1} : null;
+};
 async function proponerMenu(){
   const p = pacienteActual(); if (!p) return;
   if (!S.recipes.length) { setMsg('Primero necesitas recetas en el Recetario.', false); render(); return; }
   const rep = repartoDe(p), usos = {}, menu = [];
   for (let i = 0; i < 7; i++) {
     const obj = objetivoDia(p, i), meals = [], hoy = {};
-    if (obj) rep.forEach(([slot, pct]) => {
-      const t = {kcal:obj.kcal*pct/100, prot:obj.prot*pct/100, carb:obj.carb*pct/100, fat:obj.fat*pct/100};
-      const previa = menu[i-1] && (menu[i-1].meals.find(m => m.slot === slot) || {}).rid;
-      const mejor = candidatas(slot).map(r => ({r, sc:puntua(r, t, usos, previa, hoy)})).sort((a,b) => a.sc - b.sc)[0];
-      if (mejor) { usos[mejor.r.id] = (usos[mejor.r.id]||0) + 1; hoy[mejor.r.id] = true; meals.push(comidaDe(mejor.r, slot, escalaPara(mejor.r, t))); }
-      else meals.push({slot, rid:null});
-    });
+    if (obj) {
+      // 1) comidas fijas del día; 2) el resto del día se reparte entre las demás comidas
+      const fijas = {}; let resto = {kcal:obj.kcal, prot:obj.prot, carb:obj.carb, fat:obj.fat}, pctLibre = 0;
+      rep.forEach(([slot, pct]) => {
+        const f = fijaDe(p, slot, i);
+        if (f) { fijas[slot] = f; resto.kcal -= f.r.kcal*f.s; resto.prot -= f.r.prot*f.s; resto.carb -= f.r.carb*f.s; resto.fat -= f.r.fat*f.s; hoy[f.r.id] = true; }
+        else pctLibre += pct;
+      });
+      ['kcal','prot','carb','fat'].forEach(k => { resto[k] = Math.max(resto[k], 0); });
+      rep.forEach(([slot, pct]) => {
+        if (fijas[slot]) { const m = comidaDe(fijas[slot].r, slot, fijas[slot].s); m.fija = true; meals.push(m); return; }
+        const q = pctLibre ? pct / pctLibre : 0;
+        const t = {kcal:resto.kcal*q, prot:resto.prot*q, carb:resto.carb*q, fat:resto.fat*q};
+        const previa = menu[i-1] && (menu[i-1].meals.find(m => m.slot === slot) || {}).rid;
+        const mejor = candidatas(slot).map(r => ({r, sc:puntua(r, t, usos, previa, hoy)})).sort((a,b) => a.sc - b.sc)[0];
+        if (mejor) { usos[mejor.r.id] = (usos[mejor.r.id]||0) + 1; hoy[mejor.r.id] = true; meals.push(comidaDe(mejor.r, slot, escalaPara(mejor.r, t))); }
+        else meals.push({slot, rid:null});
+      });
+    }
     menu.push({meals});
   }
   S.menu = menu; setMsg('Menú propuesto. Toca cualquier comida para cambiarla.', true); render(); await guardarMenu();
@@ -333,7 +351,8 @@ function vMenu(p){
   const hay = S.menu && S.menu.some(d => d.meals && d.meals.length);
   let html = '<div class="card"><h3>Menú de la semana</h3>' +
     '<p class="sub" style="margin-bottom:10px">'+(hay ? 'Toca una comida para cambiar la receta o la ración.' : 'La app propone una receta para cada comida, con la ración ajustada a las kcal y macros del día.')+'</p>' +
-    '<div class="btn-row"><button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Proponer de nuevo' : '✨ Proponer menú')+'</button><button class="btn secondary" data-act="repartoDlg">Reparto</button></div></div>';
+    '<div class="btn-row"><button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Proponer de nuevo' : '✨ Proponer menú')+'</button><button class="btn secondary" data-act="repartoDlg">Reparto</button></div>' +
+    '<button class="btn secondary" style="margin-top:10px" data-act="fijasDlg">📌 Comidas fijas'+(Object.keys(p.fijas||{}).some(k => p.fijas[k] && p.fijas[k].rid) ? ' ('+Object.keys(p.fijas).filter(k => p.fijas[k] && p.fijas[k].rid).length+')' : '')+'</button></div>';
   if (!hay) return html;
   html += DIAS.map((d, i) => {
     const dia = S.menu[i]; if (!dia || !dia.meals || !dia.meals.length) return '';
@@ -341,7 +360,7 @@ function vMenu(p){
     const filas = dia.meals.map((m, j) => {
       if (!m.rid) return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b><p class="sub">Sin receta · toca para elegir</p></div><span class="chev">＋</span></button>';
       const v = valsComida(m);
-      return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b> · '+esc(m.name)+
+      return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b>'+(m.fija ? ' 📌' : '')+' · '+esc(m.name)+
         '<p class="sub">ración ×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+' · '+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p></div><span class="chev">›</span></button>';
     }).join('');
     return '<div class="card"><h3 style="margin-bottom:2px">'+d+' · '+NIVELES[S.levels[i]-1]+'</h3>' +
@@ -384,6 +403,36 @@ async function cambiarSlot(fn, cerrar, aviso){
   render();
   const ok = await guardarMenu();
   if (ok && aviso) { render(); }
+}
+const DIA_CORTO = ['L','M','X','J','V','S','D'];
+function dlgFijas(){
+  const p = pacienteActual(); if (!p) return;
+  const recs = S.recipes.slice().sort(porNombre);
+  const bloques = repartoDe(p).map(([slot], i) => {
+    const f = (p.fijas && p.fijas[slot]) || {};
+    const dias = Array.isArray(f.days) ? f.days : [0,1,2,3,4];
+    return '<div class="card" style="margin-bottom:12px"><h3>'+esc(slot)+'</h3>' +
+      '<div class="field"><label class="f" for="fx'+i+'">Receta fija</label><select id="fx'+i+'"><option value="">— ninguna (la app elige) —</option>' +
+      recs.map(r => '<option value="'+esc(r.id)+'"'+(r.id === f.rid ? ' selected' : '')+'>'+esc(r.name)+'</option>').join('') + '</select></div>' +
+      '<p class="sub" style="margin-bottom:6px">Días en que se repite</p><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
+      DIA_CORTO.map((d, k) => '<label style="display:flex;flex-direction:column;align-items:center;gap:2px;font-weight:800;font-size:17px"><input type="checkbox" id="fd'+i+'_'+k+'" style="width:28px;min-height:28px"'+(dias.indexOf(k) >= 0 ? ' checked' : '')+'>'+d+'</label>').join('') + '</div>' +
+      '<div class="field"><label class="f" for="fs'+i+'">Ración (1 = la receta entera)</label><input id="fs'+i+'" inputmode="decimal" value="'+esc(kgTxt(f.s || 1))+'"></div></div>';
+  }).join('');
+  abrirDlg('<h2>Comidas fijas</h2><p class="sub" style="margin-bottom:12px">Comidas que se repiten (por ejemplo, el desayuno de lunes a viernes). El resto del día se reparte contando con ellas. Después puedes cambiar una en un día concreto tocándola.</p>' +
+    bloques + '<div class="msg err" id="fx_msg"></div><div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn" data-act="guardarFijas">Guardar</button></div>');
+}
+async function guardarFijas(){
+  const p = pacienteActual(); if (!p) return;
+  const fijas = {};
+  repartoDe(p).forEach(([slot], i) => {
+    const rid = $('#fx'+i).value; if (!rid) return;
+    const days = DIA_CORTO.map((d, k) => $('#fd'+i+'_'+k).checked ? k : -1).filter(k => k >= 0);
+    const sc = parseFloat(String($('#fs'+i).value).replace(',', '.'));
+    fijas[slot] = {rid, days, s:isFinite(sc) && sc > 0 ? Math.round(sc*20)/20 : 1};
+  });
+  try { await refPac(p.id).update({fijas}); p.fijas = fijas; cerrarDlg(); setMsg('Comidas fijas guardadas. Pulsa «Proponer menú» para aplicarlas.', true); }
+  catch(e){ $('#fx_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
+  render();
 }
 function dlgReparto(){
   const p = pacienteActual(); if (!p) return;
@@ -874,6 +923,8 @@ document.addEventListener('click', e => {
     case 'vincular': dlgVinculo(); break;
     case 'proponerMenu': proponerMenu(); break;
     case 'repartoDlg': dlgReparto(); break;
+    case 'fijasDlg': dlgFijas(); break;
+    case 'guardarFijas': guardarFijas(); break;
     case 'guardarReparto': guardarReparto(); break;
     case 'slotMenu': S.slotQ = ''; S.slot = {d:parseInt(t.dataset.d,10), m:parseInt(t.dataset.m,10)}; dlgSlot(); break;
     case 'escalaSlot': cambiarSlot(m => { m.s = Math.round(clamp(m.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }); break;
@@ -881,7 +932,7 @@ document.addEventListener('click', e => {
     case 'elegirReceta': { const r = recetaPorId(t.dataset.id); if (r) { const p = pacienteActual(); const sl = S.slot; const m0 = S.menu[sl.d].meals[sl.m];
         const pct = (repartoDe(p).find(x => x[0] === m0.slot) || [0,0])[1], obj = objetivoDia(p, sl.d);
         const s = obj ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
-        cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s)), true, DIAS[sl.d]+' · '+m0.slot+': cambiado a '+r.name+'.'); } break; }
+        cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s), {fija:false}), true, DIAS[sl.d]+' · '+m0.slot+': cambiado a '+r.name+'.'); } break; }
     case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
     case 'verReceta': dlgVerReceta(t.dataset.id); break;
     case 'nuevaReceta': S.cola = []; dlgFormReceta(null, 0); break;
