@@ -49,7 +49,7 @@
 @media print{
   @page{size:A4;margin:10mm}
   html,body{background:#fff!important}
-  #root>.app,.pdfbar,.dlg-back,.toast{display:none!important}
+  #root>.app,.pdfbar,.dlg-back,.toast,.side,.sidebk,.dlg-bg{display:none!important}
   .pdfdoc{position:static;overflow:visible;background:#fff}
   .pdfpage{max-width:none;margin:0;padding:0;font-size:11.5px}
   .pdfpage .g2>div,.pdfpage .kpis,.pdfpage tr{break-inside:avoid}
