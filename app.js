@@ -389,7 +389,9 @@ function dlgSlot(){
       '<button class="btn danger" style="margin-top:10px" data-act="quitarSlot">Quitar esta comida</button></div>';
   }
   const buscador = '<div class="field"><label class="f" for="sq">Buscar receta</label><input id="sq" type="search" value="'+esc(S.slotQ||'')+'" placeholder="Nombre o ingrediente…" autocomplete="off"></div>';
-  const lista = buscador + (cands.length ? '<h3 style="margin:6px 0">'+(q ? 'Resultados' : 'Recetas que encajan')+'</h3><div class="list">' + cands.filter(r => r.id !== m.rid).map(r => {
+  const sinKcal = S.recipes.filter(r => !(r.kcal > 0)).length;
+  const lista = buscador + '<button class="btn secondary" style="margin-bottom:10px" data-act="recetaDesdeSlot">＋ Añadir receta a mano</button>' +
+    (sinKcal ? '<p class="sub" style="margin-bottom:10px">⚠ '+sinKcal+' receta'+(sinKcal>1?'s':'')+' sin calorías no sale'+(sinKcal>1?'n':'')+' aquí. Ábrela'+(sinKcal>1?'s':'')+' en el Recetario y pulsa «Calcular macros».</p>' : '') + (cands.length ? '<h3 style="margin:6px 0">'+(q ? 'Resultados' : 'Recetas que encajan')+'</h3><div class="list">' + cands.filter(r => r.id !== m.rid).map(r => {
     const s = t ? escalaPara(r, t) : 1;
     return '<button class="row" data-act="elegirReceta" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(s)+' · '+Math.round(r.kcal*s)+' kcal · P '+r1(r.prot*s)+' · C '+r1(r.carb*s)+' · G '+r1(r.fat*s)+'</p></div><span class="chev">›</span></button>';
   }).join('') + '</div>' : '<div class="empty">'+(q ? 'Ninguna receta coincide.' : 'No hay recetas para esta comida. Añade recetas en el Recetario.')+'</div>');
@@ -512,7 +514,7 @@ function setMsg(t, ok){ S.msg = t; S.msgOk = !!ok; }
 
 /* ---------- ventana emergente ---------- */
 function abrirDlg(html){ $('#dlgBody').innerHTML = html; $('#dlg').classList.add('open'); }
-function cerrarDlg(){ $('#dlg').classList.remove('open'); }
+function cerrarDlg(){ $('#dlg').classList.remove('open'); S.slotPend = null; }
 function dlgPaciente(p){
   const v = p || {};
   abrirDlg('<h2>'+(p?'Editar paciente':'Nuevo paciente')+'</h2>' +
@@ -707,16 +709,29 @@ async function guardarReceta(id){
   const ing = $('#r_ing').value.split('\n').map(x => x.trim()).filter(Boolean);
   if (!name) { $('#r_msg').textContent = 'Escribe el nombre.'; return; }
   if (!ing.length) { $('#r_msg').textContent = 'Escribe al menos un ingrediente.'; return; }
-  const kcal = Math.round(leerNum('r_kcal')), prot = leerNum('r_p'), carb = leerNum('r_c'), fat = leerNum('r_g');
+  let kcal = Math.round(leerNum('r_kcal')), prot = leerNum('r_p'), carb = leerNum('r_c'), fat = leerNum('r_g'), peso = Math.round(leerNum('r_w'));
+  if (!kcal && !prot && !carb && !fat) { // sin macros: se estiman desde los ingredientes
+    const e = RPT_RECETAS.estimarMacros(ing, Math.max(parseInt($('#r_serv').value, 10) || 1, 1));
+    kcal = e.kcal; prot = e.prot; carb = e.carb; fat = e.grasa; peso = peso || e.peso;
+  }
   const datos = { name, servings:Math.max(parseInt($('#r_serv').value, 10) || 1, 1), useIn:($('#r_use').value || '').trim(), ingredients:ing,
-    prep:($('#r_prep').value || '').trim(), kcal, prot, carb, fat, weight:Math.round(leerNum('r_w')),
+    prep:($('#r_prep').value || '').trim(), kcal, prot, carb, fat, weight:peso,
     category:RPT_RECETAS.categorizar(kcal, prot, carb, fat), shared:$('#r_sh').checked, updatedMs:Date.now() };
   try {
+    let nuevoId = null;
     if (id) await db.collection('nu_recipes').doc(id).update(datos);
-    else await db.collection('nu_recipes').add(Object.assign({ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now()}, datos));
+    else nuevoId = (await db.collection('nu_recipes').add(Object.assign({ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now()}, datos))).id;
     await cargarRecetas();
+    if (nuevoId && S.slotPend) { const sp = S.slotPend; S.slotPend = null; S.slot = sp; asignarASlot(nuevoId); return; }
   } catch(e){ $('#r_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
   siguienteDeCola();
+}
+function asignarASlot(rid){
+  const r = recetaPorId(rid), p = pacienteActual(), sl = S.slot; if (!r || !p || !sl) { cerrarDlg(); render(); return; }
+  const m0 = S.menu[sl.d].meals[sl.m];
+  const pct = (repartoDe(p).find(x => x[0] === m0.slot) || [0,0])[1], obj = objetivoDia(p, sl.d);
+  const s = obj && r.kcal > 0 ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
+  cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s), {fija:false}), true, DIAS[sl.d]+' · '+m0.slot+': añadida y puesta «'+r.name+'». Ya está también en tu Recetario.');
 }
 function siguienteDeCola(){
   if (S.cola.length) { const r = S.cola.shift(); dlgFormReceta(r, S.cola.length); }
@@ -940,7 +955,8 @@ document.addEventListener('click', e => {
     case 'editarReceta': S.cola = []; dlgFormReceta(recetaPorId(t.dataset.id), 0); break;
     case 'calcReceta': calcReceta(); break;
     case 'guardarReceta': guardarReceta(t.dataset.id); break;
-    case 'cerrarReceta': if (S.cola.length) siguienteDeCola(); else cerrarDlg(); break;
+    case 'recetaDesdeSlot': S.slotPend = S.slot; S.cola = []; dlgFormReceta(null, 0); break;
+    case 'cerrarReceta': S.slotPend = null; if (S.cola.length) siguienteDeCola(); else cerrarDlg(); break;
     case 'compartirReceta': compartirReceta(t.dataset.id); break;
     case 'copiarReceta': copiarReceta(t.dataset.id); break;
     case 'borrarReceta': borrarReceta(t.dataset.id, t); break;

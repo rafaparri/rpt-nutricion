@@ -6,6 +6,26 @@
 'use strict';
 const D = window.RPT_DATOS;
 const FOOD_DB = D.FOOD_DB, UNIDADES = D.UNIDADES, ALIAS = D.ALIAS;
+/* Alimentos que la app anterior no tenía: kcal, proteína, hidratos, grasa por 100 g y peso de una unidad (g). */
+const EXTRA_FOODS = {
+  "fruta": [45,0.6,11,0.2,150], "pera": [57,0.4,15,0.1,170], "kiwi": [61,1.1,15,0.5,75], "uva": [69,0.7,18,0.2,5],
+  "melocoton": [39,0.9,10,0.3,150], "mandarina": [53,0.8,13,0.3,80], "sandia": [30,0.6,8,0.2,300], "melon": [34,0.8,8,0.2,300],
+  "pina": [50,0.5,13,0.1,100], "mango": [60,0.8,15,0.4,250], "cereza": [63,1.1,16,0.2,8], "ciruela": [46,0.7,11,0.3,60],
+  "higo": [74,0.8,19,0.3,50], "frambuesa": [52,1.2,12,0.7,5], "arandano": [57,0.7,14,0.3,2], "limon": [29,1.1,9,0.3,100],
+  "zumo de naranja": [45,0.7,10,0.2,200], "pasas": [299,3.1,79,0.5,1], "datil": [282,2.5,75,0.4,8],
+  "pan integral": [247,13,41,3.4,30], "pan de molde": [265,8,49,3.5,25], "tortita de arroz": [387,8,82,3,9],
+  "arroz integral": [350,7.5,77,2.7,185], "cuscus": [376,13,77,0.6,100], "copos de maiz": [357,7,84,0.9,30],
+  "muesli": [360,10,66,6,40], "galleta": [450,6,70,16,8], "cacao": [228,20,58,14,10], "chocolate negro": [546,5,61,31,10],
+  "pechuga de pavo": [104,22,0.5,1.7,100], "pavo": [104,22,0.5,1.7,100], "jamon york": [107,17,1,4,20], "lomo": [143,22,0,6,100],
+  "clara": [52,11,0.7,0.2,33], "queso fresco": [98,11,3.5,4.5,125], "requeson": [98,11,3.4,4.3,100], "queso crema": [342,6,4,34,20],
+  "tofu": [76,8,1.9,4.8,100], "mantequilla": [717,0.9,0.1,81,10], "nata": [345,2,3,36,15], "leche desnatada": [35,3.4,5,0.1,200],
+  "bebida de soja": [33,3.3,0.5,1.8,200], "bebida de avena": [45,1,8,1.5,200], "proteina en polvo": [400,80,8,6,30],
+  "crema de cacahuete": [600,25,20,50,15], "cacahuete": [567,26,16,49,1], "pistacho": [560,20,28,45,1], "avellana": [628,15,17,61,1],
+  "semillas de chia": [486,17,42,31,10], "semillas de lino": [534,18,29,42,10], "hummus": [166,8,14,10,30],
+  "aceituna": [115,0.8,6,11,4], "tomate frito": [80,1.5,10,4,30], "judia verde": [31,1.8,7,0.2,100]
+};
+Object.keys(EXTRA_FOODS).forEach(k => { if (!D.FOOD_DB[k]) D.FOOD_DB[k] = EXTRA_FOODS[k]; });
+
 const IGNORAR = D.IGNORAR, VERBOS = new Set(D.VERBOS), VACIAS = new Set(D.VACIAS);
 const RACIONES_DEF = D.RACIONES;
 
@@ -52,9 +72,10 @@ function buscarIngrediente(nombreNorm){
   for (const clave of Object.keys(FOOD_DB)) {
     const pk = clave.split(/\s+/).filter(w => w && !VACIAS.has(w)).map(stem);
     if (!pk.length) continue;
-    const coinc = pk.filter(k => ing.some(i => k === i || i.indexOf(k) >= 0 || k.indexOf(i) >= 0)).length;
+    const parte = (a, b) => a.length >= 3 && b.indexOf(a) >= 0; // coincidencia por parte de palabra: mínimo 3 letras (evita que «g» encaje con «integral»)
+    const coinc = pk.filter(k => ing.some(i => k === i || parte(k, i) || parte(i, k))).length;
     if (coinc !== pk.length) continue;
-    const esPrincipal = pk.some(k => k === primera || (primera !== undefined && (primera.indexOf(k) >= 0 || k.indexOf(primera) >= 0)));
+    const esPrincipal = pk.some(k => k === primera || (primera !== undefined && (parte(k, primera) || parte(primera, k))));
     if (esPrincipal && !mejorPrincipal) { mejor = clave; mejorP = coinc; mejorPrincipal = true; }
     else if (esPrincipal === mejorPrincipal && coinc > mejorP) { mejor = clave; mejorP = coinc; }
   }
