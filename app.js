@@ -48,11 +48,11 @@ function cargaDia(entries){
   });
   return t;
 }
-// 1 Descanso (sin carga) · 2 Baja · 3 Media · 4 Alta (cerca del día más duro)
+// 1 Descanso (sin carga) · 2 Baja (menos de la mitad del día más duro) · 3 Media · 4 Alta (el día más duro)
 function nivelesDePlan(plan){
   const c = DIAKEYS.map(k => cargaDia(plan && plan.days && plan.days[k]));
   const max = Math.max.apply(null, c);
-  return c.map(x => x <= 0 ? 1 : (x >= 0.75*max ? 4 : (x >= 0.4*max ? 3 : 2)));
+  return c.map(x => x <= 0 ? 1 : (x >= 0.95*max ? 4 : (x >= 0.5*max ? 3 : 2)));
 }
 // Aplica los días que el atleta pasó de uno a otro ("pasar el entreno del jueves al viernes")
 function planConMovimientos(plan, moves){
