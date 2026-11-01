@@ -159,8 +159,10 @@ async function cargarPacientes(){
     .sort((a,b) => String(a.name||'').localeCompare(String(b.name||''),'es'));
 }
 async function cargarPesos(){
-  const snap = await refPac(S.pid).collection('weights').orderBy(firebase.firestore.FieldPath.documentId(),'desc').limit(8).get();
-  S.weights = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
+  // Sin orderBy: se leen todos (pocos) y se ordenan aquí, por si falla el orden en el servidor.
+  const snap = await refPac(S.pid).collection('weights').get();
+  S.weights = snap.docs.map(d => Object.assign({id:d.id}, d.data()))
+    .sort((a,b) => a.id < b.id ? 1 : -1).slice(0, 8);
 }
 async function cargarSemana(){
   const d = await refPac(S.pid).collection('weeks').doc(S.weekStart).get();
@@ -169,7 +171,7 @@ async function cargarSemana(){
 async function abrirPaciente(id){
   S.pid = id; S.ptab = 'resumen'; S.weights = []; S.levels = null; S.weekStart = lunesISO(new Date()); setMsg(null);
   render();
-  try { await cargarPesos(); } catch(e){ setMsg('No se pudo leer el peso.', false); }
+  try { await cargarPesos(); } catch(e){ setMsg('No se pudo leer el peso (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('pesos', e); }
   render();
 }
 async function guardarPaciente(id){
@@ -193,7 +195,7 @@ async function guardarPeso(){
   try {
     await refPac(S.pid).collection('weights').doc(iso(new Date())).set({kg:Math.round(kg*10)/10, by:'nutricion', byUid:S.user.uid, at:firebase.firestore.FieldValue.serverTimestamp()});
     setMsg('Guardado.', true); await cargarPesos();
-  } catch(e){ setMsg('No se pudo guardar. Inténtalo de nuevo.', false); }
+  } catch(e){ setMsg('No se pudo guardar (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('peso', e); }
   render();
 }
 async function ponerNivel(dia, nivel){
@@ -203,7 +205,7 @@ async function ponerNivel(dia, nivel){
 }
 async function cambiarSemana(n){
   S.weekStart = sumaDias(S.weekStart, n); S.levels = null; setMsg(null); render();
-  try { await cargarSemana(); } catch(e){ setMsg('No se pudo leer la semana.', false); }
+  try { await cargarSemana(); } catch(e){ setMsg('No se pudo leer la semana (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('semana', e); }
   render();
 }
 async function borrarPaciente(){
