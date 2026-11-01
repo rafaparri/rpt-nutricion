@@ -341,6 +341,80 @@ async function proponerMenu(){
   }
   S.menu = menu; setMsg('Menú propuesto. Toca cualquier comida para cambiarla.', true); render(); await guardarMenu();
 }
+/* Objetivo de cada comida de un día: las fijas no se tocan; el resto se reparte lo que queda. */
+function objetivosComidas(p, i, meals){
+  const obj = objetivoDia(p, i); if (!obj) return null;
+  const rep = repartoDe(p); let resto = {kcal:obj.kcal, prot:obj.prot, carb:obj.carb, fat:obj.fat}, libre = 0;
+  meals.forEach((m, j) => {
+    const pct = (rep.find(x => x[0] === m.slot) || [m.slot, 0])[1];
+    if (m.rid && m.fija) { const v = valsComida(m); resto.kcal -= v.kcal; resto.prot -= v.prot; resto.carb -= v.carb; resto.fat -= v.fat; }
+    else libre += pct;
+  });
+  ['kcal','prot','carb','fat'].forEach(k => { resto[k] = Math.max(resto[k], 0); });
+  return meals.map(m => {
+    if (m.rid && m.fija) return null;
+    const pct = (rep.find(x => x[0] === m.slot) || [m.slot, 0])[1], q = libre ? pct/libre : 0;
+    return {kcal:resto.kcal*q, prot:resto.prot*q, carb:resto.carb*q, fat:resto.fat*q};
+  });
+}
+/* ---------- copiar menú de otra semana ---------- */
+async function dlgCopiarSemana(){
+  abrirDlg('<h2>Copiar menú de otra semana</h2><div class="empty">Buscando semanas…</div>');
+  try {
+    const snap = await refPac(S.pid).collection('weeks').get();
+    S.semanasMenu = snap.docs.map(d => ({id:d.id, menu:d.data().menu, levels:d.data().levels}))
+      .filter(w => w.id !== S.weekStart && Array.isArray(w.menu) && w.menu.some(d => d.meals && d.meals.some(m => m.rid))).sort((a,b) => a.id < b.id ? 1 : -1);
+  } catch(e){ abrirDlg('<h2>Copiar menú</h2><div class="msg err">No se pudieron leer las semanas ('+esc((e && (e.code||e.message)) || 'error')+').</div><button class="btn ghost" data-act="cerrar">Cerrar</button>'); return; }
+  if (!S.semanasMenu.length) { abrirDlg('<h2>Copiar menú de otra semana</h2><div class="empty">Este paciente aún no tiene menús en otras semanas.</div><button class="btn ghost" data-act="cerrar">Cerrar</button>'); return; }
+  abrirDlg('<h2>Copiar menú de otra semana</h2><p class="sub" style="margin-bottom:12px">Se copiará a la semana del '+fechaCorta(S.weekStart).slice(0,5)+'. Sustituye el menú actual de esa semana.</p>' +
+    '<label style="display:flex;gap:10px;align-items:center;margin-bottom:12px;font-size:17px"><input id="cp_aj" type="checkbox" checked style="width:24px;min-height:24px"> Ajustar las raciones a los objetivos de esta semana</label>' +
+    '<div class="list">' + S.semanasMenu.map(w => '<button class="row" data-act="copiarDe" data-w="'+esc(w.id)+'"><div class="grow"><b>'+fechaCorta(w.id).slice(0,5)+' – '+fechaCorta(sumaDias(w.id,6)).slice(0,5)+'</b><p class="sub">'+w.menu.filter(d => d.meals && d.meals.some(m => m.rid)).length+' días con menú</p></div><span class="chev">›</span></button>').join('') + '</div>' +
+    '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cancelar</button>');
+}
+async function copiarDe(wid){
+  const w = (S.semanasMenu || []).find(x => x.id === wid), p = pacienteActual(); if (!w || !p) return;
+  const ajustar = $('#cp_aj') && $('#cp_aj').checked;
+  const menu = JSON.parse(JSON.stringify(w.menu));
+  if (ajustar) menu.forEach((dia, i) => {
+    const t = objetivosComidas(p, i, dia.meals || []); if (!t) return;
+    dia.meals.forEach((m, j) => { const r = m.rid && recetaPorId(m.rid); if (r && t[j] && r.kcal > 0) m.s = escalaPara(r, t[j]); });
+  });
+  S.menu = menu; cerrarDlg(); setMsg('Menú copiado de la semana del '+fechaCorta(wid).slice(0,5)+'. Toca cualquier comida para cambiarla.', true); render(); await guardarMenu();
+}
+const CERO = {kcal:0, prot:0, carb:0, fat:0, g:0};
+const valsReal = m => m.real ? (m.real.none ? CERO : valsComida(m.real)) : valsComida(m);
+const delta = (x, d) => (x >= 0 ? '+' : '−') + kgTxt(Math.abs(Math.round(x*Math.pow(10, d||0))/Math.pow(10, d||0)));
+function txtVariacion(a, b){ // b (real) respecto a a (planificado)
+  return delta(b.kcal-a.kcal, 0)+' kcal · P '+delta(b.prot-a.prot, 1)+' · C '+delta(b.carb-a.carb, 1)+' · G '+delta(b.fat-a.fat, 1);
+}
+function totalReal(dia){
+  const t = {kcal:0, prot:0, carb:0, fat:0};
+  (dia.meals||[]).forEach(m => { if (m.rid) { const v = valsReal(m); t.kcal += v.kcal; t.prot += v.prot; t.carb += v.carb; t.fat += v.fat; } });
+  return t;
+}
+const hayReal = dia => (dia.meals||[]).some(m => m.rid && m.real);
+function dlgReal(){
+  const p = pacienteActual(), sl = S.slot; if (!p || !sl) return;
+  const m = S.menu[sl.d].meals[sl.m], plan = valsComida(m);
+  let h = '<h2>'+DIAS[sl.d]+' · '+esc(m.slot)+'</h2><p class="sub" style="margin-bottom:10px">Cambio sobre la marcha: lo que se comió de verdad frente a lo planificado.</p>' +
+    '<div class="card" style="margin-bottom:10px"><p class="sub">Planificado</p><b>'+esc(m.name)+'</b><p class="sub">'+Math.round(plan.kcal)+' kcal · P '+r1(plan.prot)+' · C '+r1(plan.carb)+' · G '+r1(plan.fat)+'</p></div>';
+  if (m.real) {
+    const rv = valsReal(m);
+    h += '<div class="card accent" style="margin-bottom:10px"><p class="sub">Comido</p><b>'+(m.real.none ? 'No se comió' : esc(m.real.name))+'</b>' +
+      '<p class="sub">'+Math.round(rv.kcal)+' kcal · P '+r1(rv.prot)+' · C '+r1(rv.carb)+' · G '+r1(rv.fat)+'</p>' +
+      '<p style="margin:6px 0 10px;font-weight:800;font-size:17px">Variación: '+txtVariacion(plan, rv)+'</p>' +
+      (m.real.none ? '' : '<div class="btn-row"><button class="btn secondary" data-act="escalaReal" data-n="-0.1">− Ración</button><b style="align-self:center;text-align:center;min-width:64px">×'+kgTxt(Math.round(m.real.s*100)/100)+'</b><button class="btn secondary" data-act="escalaReal" data-n="0.1">＋ Ración</button></div>') +
+      '<button class="btn danger" style="margin-top:10px" data-act="quitarReal">Volver a lo planificado</button></div>';
+  }
+  const q = norm(S.realQ || '');
+  const lista = S.recipes.filter(r => (r.kcal||0) > 0 && (!q || norm([r.name, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0)).slice(0, q ? 30 : 12);
+  h += '<button class="btn secondary" style="margin-bottom:10px" data-act="noComi">🚫 No se comió esta comida</button>' +
+    '<div class="field"><label class="f" for="rq2">Lo que se comió</label><input id="rq2" type="search" value="'+esc(S.realQ||'')+'" placeholder="Buscar receta…" autocomplete="off"></div>' +
+    (lista.length ? '<div class="list">'+lista.map(r => { const sc = Math.round(clamp(plan.kcal/Math.max(r.kcal,1), 0.3, 3)*20)/20;
+      return '<button class="row" data-act="elegirReal" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(sc)+' · '+Math.round(r.kcal*sc)+' kcal · P '+r1(r.prot*sc)+' · C '+r1(r.carb*sc)+' · G '+r1(r.fat*sc)+'</p></div><span class="chev">›</span></button>'; }).join('')+'</div>' : '<div class="empty">Ninguna receta coincide.</div>') +
+    '<div class="btn-row" style="margin-top:12px"><button class="btn secondary" data-act="slotMenu" data-d="'+sl.d+'" data-m="'+sl.m+'">‹ Volver</button><button class="btn" data-act="cerrar">Hecho</button></div>';
+  abrirDlg(h);
+}
 function totalDia(dia){
   const t = {kcal:0, prot:0, carb:0, fat:0};
   (dia.meals||[]).forEach(m => { if (m.rid) { const v = valsComida(m); t.kcal += v.kcal; t.prot += v.prot; t.carb += v.carb; t.fat += v.fat; } });
@@ -354,6 +428,7 @@ function vMenu(p){
   let html = '<div class="card"><h3>Menú de la semana</h3>' +
     '<p class="sub" style="margin-bottom:10px">'+(hay ? 'Toca una comida para cambiar la receta o la ración.' : 'La app propone una receta para cada comida, con la ración ajustada a las kcal y macros del día.')+'</p>' +
     '<div class="btn-row"><button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Proponer de nuevo' : '✨ Proponer menú')+'</button><button class="btn secondary" data-act="repartoDlg">Reparto</button></div>' +
+    '<button class="btn secondary" style="margin-top:10px" data-act="copiarSemana">📋 Copiar de otra semana</button>' +
     '<button class="btn secondary" style="margin-top:10px" data-act="fijasDlg">📌 Comidas fijas'+(() => { const f = fijasDe(p), n = Object.keys(f).filter(k => f[k] && f[k].rid).length; return n ? ' ('+n+(fijasPropias(p) ? '' : ', por defecto')+')' : ''; })()+'</button></div>';
   if (!hay) return html;
   html += DIAS.map((d, i) => {
@@ -362,11 +437,16 @@ function vMenu(p){
     const filas = dia.meals.map((m, j) => {
       if (!m.rid) return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b><p class="sub">Sin receta · toca para elegir</p></div><span class="chev">＋</span></button>';
       const v = valsComida(m);
+      let real = '';
+      if (m.real) { const rv = valsReal(m);
+        real = '<p class="sub" style="color:var(--t-accent2);font-weight:700">🔁 Comido: '+(m.real.none ? 'nada' : esc(m.real.name)+' · ×'+kgTxt(Math.round(m.real.s*100)/100)+' · '+Math.round(rv.kcal)+' kcal · P '+r1(rv.prot)+' · C '+r1(rv.carb)+' · G '+r1(rv.fat))+'</p>' +
+          '<p class="sub">Variación: '+txtVariacion(v, rv)+'</p>'; }
       return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b>'+(m.fija ? ' 📌' : '')+' · '+esc(m.name)+
-        '<p class="sub">ración ×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+' · '+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p></div><span class="chev">›</span></button>';
+        '<p class="sub">'+(m.real ? 'Planificado: ' : '')+'ración ×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+' · '+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p>'+real+'</div><span class="chev">›</span></button>';
     }).join('');
     return '<div class="card"><h3 style="margin-bottom:2px">'+d+' · '+NIVELES[S.levels[i]-1]+'</h3>' +
       '<p class="sub" style="margin-bottom:8px">Total '+Math.round(tot.kcal)+' de '+(obj ? obj.kcal : '?')+' kcal · P '+Math.round(tot.prot)+'/'+(obj ? obj.prot : '?')+' · C '+Math.round(tot.carb)+'/'+(obj ? obj.carb : '?')+' · G '+Math.round(tot.fat)+'/'+(obj ? obj.fat : '?')+'</p>' +
+      (hayReal(dia) ? (() => { const rt = totalReal(dia); return '<p class="sub" style="margin:-4px 0 8px;color:var(--t-accent2);font-weight:700">Real: '+Math.round(rt.kcal)+' kcal · P '+Math.round(rt.prot)+' · C '+Math.round(rt.carb)+' · G '+Math.round(rt.fat)+' ('+txtVariacion(tot, rt)+')</p>'; })() : '') +
       '<div class="list">'+filas+'</div></div>';
   }).join('');
   return html;
@@ -397,12 +477,13 @@ function dlgSlot(){
     const s = t ? escalaPara(r, t) : 1;
     return '<button class="row" data-act="elegirReceta" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(s)+' · '+Math.round(r.kcal*s)+' kcal · P '+r1(r.prot*s)+' · C '+r1(r.carb*s)+' · G '+r1(r.fat*s)+'</p></div><span class="chev">›</span></button>';
   }).join('') + '</div>' : '<div class="empty">'+(q ? 'Ninguna receta coincide.' : 'No hay recetas para esta comida. Añade recetas en el Recetario.')+'</div>');
-  abrirDlg(cabecera + actual + lista + '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
+  const botonReal = m.rid ? '<button class="btn secondary" style="margin-bottom:12px" data-act="realDlg">🔁 Cambio sobre la marcha'+(m.real ? ' (registrado)' : '')+'</button>' : '';
+  abrirDlg(cabecera + actual + botonReal + lista + '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
 }
-async function cambiarSlot(fn, cerrar, aviso){
+async function cambiarSlot(fn, cerrar, aviso, reabrir){
   const sl = S.slot; if (!sl) return;
   fn(S.menu[sl.d].meals[sl.m]);
-  if (cerrar) { cerrarDlg(); S.slotQ = ''; } else dlgSlot();
+  if (cerrar) { cerrarDlg(); S.slotQ = ''; S.realQ = ''; } else (reabrir || dlgSlot)();
   if (aviso) setMsg(aviso, true);
   render();
   const ok = await guardarMenu();
@@ -948,7 +1029,18 @@ document.addEventListener('click', e => {
     case 'semana': cambiarSemana(parseInt(t.dataset.n,10)); break;
     case 'recargar': recargar(); break;
     case 'vincular': dlgVinculo(); break;
-    case 'proponerMenu': proponerMenu(); break;
+    case 'realDlg': S.realQ = ''; dlgReal(); break;
+    case 'elegirReal': { const r = recetaPorId(t.dataset.id); if (r) { const m0 = S.menu[S.slot.d].meals[S.slot.m], plan = valsComida(m0);
+        const sc = Math.round(clamp(plan.kcal/Math.max(r.kcal,1), 0.3, 3)*20)/20;
+        cambiarSlot(m => { m.real = comidaDe(r, m.slot, sc); }, false, null, dlgReal); } break; }
+    case 'noComi': cambiarSlot(m => { m.real = {none:true}; }, false, null, dlgReal); break;
+    case 'quitarReal': cambiarSlot(m => { delete m.real; }, false, null, dlgReal); break;
+    case 'escalaReal': cambiarSlot(m => { if (m.real && !m.real.none) m.real.s = Math.round(clamp(m.real.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }, false, null, dlgReal); break;
+    case 'proponerMenu':
+      if (S.menu && S.menu.some(d => d.meals && d.meals.some(m => m.rid)) && !t.dataset.seguro) { t.dataset.seguro = '1'; t.textContent = '⚠ Pulsa otra vez: se sustituye el menú'; break; }
+      proponerMenu(); break;
+    case 'copiarSemana': dlgCopiarSemana(); break;
+    case 'copiarDe': copiarDe(t.dataset.w); break;
     case 'repartoDlg': dlgReparto(); break;
     case 'fijasDlg': dlgFijas(); break;
     case 'guardarFijas': guardarFijas(t.dataset.todos === '1'); break;
@@ -985,6 +1077,7 @@ document.addEventListener('click', e => {
   }
 });
 document.addEventListener('input', e => {
+  if (e.target && e.target.id === 'rq2') { S.realQ = e.target.value; dlgReal(); const n = $('#rq2'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
   if (e.target && e.target.id === 'sq') { S.slotQ = e.target.value; dlgSlot(); const n = $('#sq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; } if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
 document.addEventListener('change', e => {
   if (e.target && e.target.id === 'docxIn' && e.target.files.length) { importarDocx(e.target.files); e.target.value = ''; return; } if (e.target && e.target.id === 'woplan') S.woPlanId = e.target.value; });
