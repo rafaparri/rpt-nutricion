@@ -84,7 +84,7 @@ function solicitudesHtml(){
 /* ---------- pantallas ---------- */
 function topBar(){
   return '<header class="topbar">' + (S.view === 'app' ? '<button class="menubtn" data-act="side" aria-label="Abrir o cerrar el menú">☰</button>' : '') +
-    '<div class="brand"><span class="appicon">🥗</span><span>Nutrición</span></div>' +
+    '<div class="brand"><img class="appicon" src="static/icon-192.png" alt="" width="38" height="38"><span>NutriForce</span></div>' +
     (S.user ? '<button class="user" data-act="tab" data-v="cuenta">'+esc((S.user.email||'').split('@')[0])+' ▾</button>' : '') + '</header>';
 }
 /* Menú lateral: lo que son datos de base (paciente, recetario, cuenta). Se puede ocultar. */
@@ -104,7 +104,7 @@ function msgHtml(){ return S.msg ? '<div class="msg '+(S.msgOk?'ok':'err')+'">'+
 
 function vLogin(){
   return '<div class="app">'+topBar()+'<div class="login">' +
-    '<div class="center"><span class="appicon" style="margin:0 auto 12px">🥗</span><h1>RPT Nutrición</h1><p class="sub">Entra con la misma cuenta que usas en WorkOut, o crea una nueva.</p></div>' +
+    '<div class="center"><img class="appicon big" src="static/icon-192.png" alt="NutriForce" width="96" height="96" style="margin:0 auto 12px"><h1>NutriForce</h1><p class="sub">Entra con la misma cuenta que usas en WorkOut, o crea una nueva.</p></div>' +
     '<div class="field"><label class="f" for="em">Correo</label><input id="em" type="email" autocomplete="username" inputmode="email"></div>' +
     '<div class="field"><label class="f" for="pw">Contraseña</label><input id="pw" type="password" autocomplete="current-password"></div>' +
     msgHtml() +
@@ -603,7 +603,7 @@ function cabSemana(){
 
 /* ---------- datos y gráficos de la semana ---------- */
 const PAL_APP = {txt:'#e8eef4', muted:'#b2bfcc', line:'#263242', track:'#263242', obj:'#5fe0d5', menu:'#34d1c4', real:'#ff8a65', gasto:'#b2bfcc', ok:'#3fb26f', warn:'#f2b84b', bad:'#ef5f4a', fondo:'#3a4a5e', P:'#4f8cff', C:'#f2b84b', G:'#b07cf2'};
-const PAL_PDF = {txt:'#1b2430', muted:'#5b6b7e', line:'#d5dce4', track:'#e6ebf0', obj:'#0f8f85', menu:'#12a89c', real:'#e0623f', gasto:'#5b6b7e', ok:'#1f9d55', warn:'#d99a1c', bad:'#d6452f', fondo:'#cfd8e1', P:'#2f6fe0', C:'#d99a1c', G:'#8a52d6'};
+const PAL_PDF = {txt:'#1b2430', muted:'#5b6b7e', line:'#d5dce4', track:'#e6ebf0', obj:'#9a7420', menu:'#c99a2e', real:'#e0623f', gasto:'#5b6b7e', ok:'#1f9d55', warn:'#d99a1c', bad:'#d6452f', fondo:'#cfd8e1', P:'#2f6fe0', C:'#d99a1c', G:'#8a52d6'};
 const LVL_COL = ['#6fa8dc','#3fb26f','#f2b84b','#e0614f'];
 const fmtN = n => Math.round(n).toLocaleString('es-ES');
 function datosSemana(p){
@@ -725,7 +725,7 @@ function lecturaRapida(ds, rs, kg, pal){
 function tablaCifras(ds, pal){
   const f = (v) => v ? fmtN(v.kcal) : '–';
   const hayR = ds.some(d => d.real);
-  return '<table style="width:100%;border-collapse:collapse;font-size:15px;color:'+pal.txt+'"><thead><tr style="text-align:right;color:'+pal.muted+'"><th style="text-align:left;padding:4px 0">Día</th><th>Gasto</th><th>Objetivo</th><th>Menú</th>'+(hayR ? '<th>Real</th>' : '')+'</tr></thead><tbody>' +
+  return '<table class="cifras" style="width:100%;border-collapse:collapse;font-size:15px;color:'+pal.txt+'"><thead><tr style="text-align:right"><th style="text-align:left;padding:4px 6px">Día</th><th>Gasto</th><th>Objetivo</th><th>Menú</th>'+(hayR ? '<th>Real</th>' : '')+'</tr></thead><tbody>' +
     ds.map(d => '<tr style="border-top:1px solid '+pal.line+';text-align:right"><td style="text-align:left;padding:5px 0"><b>'+d.lbl.slice(0,3)+'</b> <span style="color:'+(d.nivel ? LVL_COL[d.nivel-1] : pal.muted)+'">'+(d.nivel ? NIVELES[d.nivel-1] : '—')+'</span></td><td>'+(d.gasto ? fmtN(d.gasto) : '–')+'</td><td>'+f(d.obj)+'</td><td>'+f(d.menu)+'</td>'+(hayR ? '<td>'+f(d.real)+'</td>' : '')+'</tr>').join('') + '</tbody></table>';
 }
 function kpi(t, v, sub, color){
@@ -772,7 +772,7 @@ function vCompra(pdf){
   const ok = pdf ? {} : compraOk();
   const nTot = gr.reduce((a, g) => a + g.items.length, 0), nOk = Object.keys(ok).filter(k => gr.some(g => g.items.some(i => i.k === k))).length;
   return '<div class="card"><h3>Lista de la compra</h3>' + (pdf ? '' : '<p class="sub" style="margin-bottom:8px">Calculada con las recetas del menú de esta semana y las raciones de cada comida. Toca un producto para tacharlo ('+nOk+' de '+nTot+').</p>') +
-    gr.map(g => '<h4 style="margin:12px 0 4px;font-size:'+(pdf ? 14 : 17)+'px;color:'+(pdf ? '#0f8f85' : 'var(--t-accent)')+'">'+g.cat+'</h4><div'+(pdf ? '' : ' class="list"')+'>' + g.items.map(i =>
+    gr.map(g => '<h4 style="margin:12px 0 4px;font-size:'+(pdf ? 14 : 17)+'px;color:'+(pdf ? '#9a7420' : 'var(--t-accent)')+'">'+g.cat+'</h4><div'+(pdf ? '' : ' class="list"')+'>' + g.items.map(i =>
       pdf ? '<div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0;border-bottom:1px solid #e6ebf0;font-size:13px"><span>☐ '+esc(i.nombre)+'</span><b>'+cantCompra(i)+'</b></div>'
           : '<button class="row" data-act="chkCompra" data-k="'+esc(i.k)+'" style="'+(ok[i.k] ? 'opacity:.5;text-decoration:line-through' : '')+'"><span style="font-size:22px;margin-right:10px">'+(ok[i.k] ? '☑' : '☐')+'</span><div class="grow"><b style="font-size:17px">'+esc(i.nombre)+'</b></div><b style="font-size:17px;white-space:nowrap">'+cantCompra(i)+'</b></button>').join('') + '</div>').join('') + '</div>';
 }
@@ -827,8 +827,9 @@ function vPdf(p){
   const ds = datosSemana(p), rs = resumenSemana(ds), kg = kgDe(), fin = sumaDias(S.weekStart, 6), hayR = ds.some(d => d.real);
   const edad = new Date().getFullYear() - p.birthYear;
   let h = '<div class="pdfdoc"><div class="pdfbar"><button class="btn secondary" data-act="pdfCerrar">‹ Cerrar</button><button class="btn" data-act="pdfImprimir">🖨️ Imprimir / Guardar PDF</button></div><div class="pdfpage">';
-  h += '<header><div><div class="brand">RPT Nutrición · Informe semanal</div><h1>'+esc(p.name)+'</h1><div class="mut">'+esc(p.sex || '')+' · '+edad+' años · '+p.heightCm+' cm · '+kgTxt(kg)+' kg'+(p.goal ? ' · Objetivo: '+esc(p.goal) : '')+'</div></div>' +
-    '<div class="wk"><b>Semana</b><br>'+fechaCorta(S.weekStart)+' – '+fechaCorta(fin)+'</div></header>';
+  h += '<header class="wo2head"><img src="static/icon-192.png" alt="NutriForce" width="64" height="64"><div><div class="ttl">INFORME SEMANAL DE NUTRICIÓN</div>' +
+    '<div class="l2">Semana  ·  '+fechaCorta(S.weekStart)+' – '+fechaCorta(fin)+'</div>' +
+    '<div class="l2">Paciente: '+esc(p.name)+'  ·  '+esc(p.sex || '')+' · '+edad+' años · '+p.heightCm+' cm · '+kgTxt(kg)+' kg'+(p.goal ? '  ·  Objetivo: '+esc(p.goal) : '')+'</div></div></header>';
   h += '<section><h2>Cómo cuadra el menú con la semana de entreno</h2>'+explicacionSemana(p, ds, rs)+'</section>';
   if (rs.nMenu) {
     h += '<section><h2>Resumen</h2><div class="kpis"><div><span>Objetivo medio</span><b>'+fmtN(rs.objMedio)+' kcal</b></div><div><span>Menú medio</span><b>'+fmtN(rs.menuMedio)+' kcal</b></div><div><span>Cubierto</span><b>'+Math.round(rs.cobertura*100)+' %</b></div><div><span>Balance semanal</span><b>'+(rs.balance >= 0 ? '+' : '−')+fmtN(Math.abs(rs.balance))+' kcal</b></div></div>' +
@@ -843,7 +844,7 @@ function vPdf(p){
   } else h += '<section><p class="mut">Esta semana aún no tiene menú.</p></section>';
   if (!rs.nMenu) { h += '<section><h2>Pautas a seguir</h2><ul>'+pautasAuto(p, ds, rs).map(x => '<li>'+x+'</li>').join('')+'</ul>' +
     (S.notas && S.notas.trim() ? '<h3>Notas del nutricionista</h3><p style="white-space:pre-wrap">'+esc(S.notas.trim())+'</p>' : '')+'</section>'; }
-  h += '<footer'+(rs.nMenu ? ' style="page:menu"' : '')+'>Generado el '+fechaCorta(iso(new Date()))+' con RPT Nutrición · Las cifras son estimaciones orientativas.</footer></div></div>';
+  h += '<footer'+(rs.nMenu ? ' style="page:menu"' : '')+'>Generado el '+fechaCorta(iso(new Date()))+' con NutriForce · RPT · Las cifras son estimaciones orientativas.</footer></div></div>';
   return h;
 }
 function tablaMenuApp(p){

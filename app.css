@@ -18,13 +18,16 @@
 
 /* ---------- Informe (PDF) ---------- */
 .pdfdoc{position:fixed;inset:0;z-index:200;background:#e9edf1;overflow:auto;-webkit-overflow-scrolling:touch;color:#1b2430;font-family:var(--font)}
-.pdfbar{position:sticky;top:0;display:flex;gap:10px;padding:10px var(--pad);background:#101820;z-index:2}
+.pdfbar{position:sticky;top:0;display:flex;gap:10px;padding:10px var(--pad);background:#0c0c0e;z-index:2}
 .pdfbar .btn{flex:1}
 .pdfpage{background:#fff;max-width:860px;margin:12px auto;padding:20px 18px;font-size:15px;line-height:1.45}
-.pdfpage header{display:flex;justify-content:space-between;gap:14px;border-bottom:3px solid #12a89c;padding-bottom:10px;margin-bottom:14px}
+.pdfpage header.wo2head{display:flex;align-items:center;gap:16px;background:#20242e;margin:-20px -18px 16px;padding:14px 18px;border-bottom:3px solid #c99a2e}
+.pdfpage .wo2head img{border-radius:8px;flex:none}
+.pdfpage .wo2head .ttl{color:#c99a2e;font:800 21px var(--font);letter-spacing:.02em}
+.pdfpage .wo2head .l2{color:#e6e6e6;font-size:13px;margin-top:3px}
 .pdfpage .brand{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#0f8f85;font-weight:800}
 .pdfpage h1{font-size:28px;margin:2px 0}
-.pdfpage h2{font-size:19px;margin:0 0 8px;color:#0f8f85;border-bottom:1px solid #d5dce4;padding-bottom:3px}
+.pdfpage h2{font-size:15px;margin:0 0 8px;color:#191919;border-left:5px solid #c99a2e;padding:3px 0 3px 10px;text-transform:uppercase;letter-spacing:.03em}
 .pdfpage h3{font-size:15px;margin:10px 0 4px}
 .pdfpage section{margin-bottom:18px;break-inside:auto}
 .pdfpage .wk{text-align:right;white-space:nowrap}
@@ -32,13 +35,13 @@
 .pdfpage p{margin:0 0 8px}
 .pdfpage ul{margin:0 0 8px 18px;padding:0}.pdfpage li{margin-bottom:5px}
 .pdfpage .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
-.pdfpage .kpis div{border:1px solid #d5dce4;border-radius:10px;padding:8px 10px}
+.pdfpage .kpis div{background:#f4f5f7;border-radius:8px;padding:8px 10px}
 .pdfpage .kpis span{display:block;font-size:12px;color:#5b6b7e}.pdfpage .kpis b{font-size:19px}
 .pdfpage .g2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
 .pdfpage table{width:100%;border-collapse:collapse;font-size:12px}
 .pdfpage .mtab th,.pdfpage .mtab td,.pdfpage .ctab th,.pdfpage .ctab td{border:1px solid #d5dce4;padding:4px 5px;vertical-align:top;text-align:left}
-.pdfpage .mtab thead th{background:#eef2f5;text-align:center}.pdfpage .mtab .sl{background:#eef2f5;white-space:nowrap}
-.pdfpage .mtab .tot td{background:#f6f9fb}.pdfpage .ctab thead th{background:#eef2f5}
+.pdfpage .mtab thead th{background:#20242e;color:#fff;text-align:center}.pdfpage .mtab .sl{background:#f4f5f7;white-space:nowrap}.pdfpage .cifras thead th{background:#20242e;color:#fff;padding:5px 6px}.pdfpage .cifras tbody tr:nth-child(even){background:#f8f8fa}.pdfpage .cifras td{padding:3px 6px}
+.pdfpage .mtab .tot td{background:#f6f9fb}.pdfpage .ctab thead th{background:#20242e;color:#fff}
 .pdfpage footer{border-top:1px solid #d5dce4;padding-top:6px;font-size:11px;color:#5b6b7e}
 .pdfpage .row{display:flex;justify-content:space-between;min-height:0;background:none;border:0;padding:2px 0;color:#1b2430}
 @media (max-width:640px){.pdfpage .g2{grid-template-columns:1fr}.pdfpage .kpis{grid-template-columns:1fr 1fr}.pdfpage header{flex-direction:column}.pdfpage .wk{text-align:left}.pdfpage .mtab{min-width:720px}}
@@ -51,6 +54,7 @@
   .pdfpage{max-width:none;margin:0;padding:0;font-size:11.5px}
   .pdfpage .g2>div,.pdfpage .kpis,.pdfpage tr{break-inside:avoid}
   .pdfpage .newpage{break-before:page}
+  .pdfpage header.wo2head{margin:0 0 12px}
   .pdfpage h2,.pdfpage h3{break-after:avoid}
   .pdfpage .g2 svg{max-height:74mm}
   .pdfpage .menupage{page:menu;break-before:page}
@@ -87,3 +91,17 @@
 .mtabapp .mut{color:var(--t-muted)}
 .mtabapp .chg{display:inline-block;margin-top:4px;padding:3px 6px;border-radius:8px;background:var(--t-accent-soft);color:var(--t-accent2);font-weight:700;font-size:13px}
 .mtabapp .tot td,.mtabapp .tot th{background:var(--t-bg2)}
+
+/* NutriForce: negro y oro, como WorkOut 2.0 */
+:root{
+  --t-bg:#0c0c0e; --t-bg2:#121114; --t-surface:#17161a; --t-surface2:#1d1b20;
+  --t-chip:#26231c; --t-line:#2e2a22; --t-edge:#3a352b;
+  --t-text:#f4f1ea; --t-muted:#bdb6a6; --t-muted2:#8f887a; --t-muted3:#6f695e;
+  --t-accent:#c99a2e; --t-accent2:#e0b453; --t-ink:#0c0c0e;
+  --t-accent-soft:#2a2316; --t-accent-edge:#5a4719;
+  --t-good:#3f9a62; --t-good-bg:#16261c; --t-good-fg:#7fd19a; --t-good-edge:#2a5a3a;
+  --t-bad:#b5503f; --t-bad-bg:#2b1614; --t-bad-fg:#f08a7c; --t-bad-edge:#5e2a22;
+  --t-chg:#e07b39; --t-chg-bg:#2d1c0f; --t-chg-fg:#f0a36b;
+}
+img.appicon{object-fit:cover;background:#0c0c0e;border:1px solid var(--t-accent-edge)}
+img.appicon.big{width:96px;height:96px;border-radius:24px}
