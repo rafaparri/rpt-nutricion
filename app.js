@@ -31,10 +31,41 @@ const S = {
   tab:'pacientes',        // pacientes | recetario | cuenta
   patients:[], pid:null, ptab:'resumen',
   weights:[], weekStart:lunesISO(new Date()), levels:null,
+  links:[], requests:[], wo:{}, woPlanId:null, woMsg:null,
   msg:null, msgOk:false, busy:false
 };
 const refPac = pid => db.collection('nu_patients').doc(pid);
 const pacienteActual = () => S.patients.find(p => p.id === S.pid);
+
+/* ---------- vínculo con WorkOut ---------- */
+const linkDe = pid => S.links.filter(l => l.patientId === pid).sort((a,b) => (b.createdMs||0)-(a.createdMs||0))[0] || null;
+const DIAKEYS = ['L','M','X','J','V','S','D'];
+function cargaDia(entries){
+  let t = 0;
+  (entries || []).forEach(e => {
+    if (e.type && e.type !== 'exercise') return;
+    (e.sets || []).forEach(x => { const ser = Number(x.series)||1, reps = Number(x.reps)||1, kg = Number(x.kg)||0; t += ser*reps*(kg>0 ? kg : 10); });
+  });
+  return t;
+}
+// 1 Descanso (sin carga) · 2 Baja · 3 Media · 4 Alta (cerca del día más duro)
+function nivelesDePlan(plan){
+  const c = DIAKEYS.map(k => cargaDia(plan && plan.days && plan.days[k]));
+  const max = Math.max.apply(null, c);
+  return c.map(x => x <= 0 ? 1 : (x >= 0.75*max ? 4 : (x >= 0.4*max ? 3 : 2)));
+}
+function nombrePlan(p){ return (p.meta && p.meta.week != null) ? 'Semana '+p.meta.week : (p.id || 'Plan'); }
+function compsDeLaSemana(pid){
+  const w = S.wo[pid]; if (!w) return [];
+  const fin = sumaDias(S.weekStart, 6);
+  return w.comps.map(c => ({c, d:c.day || c.startDate})).filter(x => x.d && x.d >= S.weekStart && x.d <= fin);
+}
+function solicitudesHtml(){
+  return S.requests.filter(l => l.status === 'pending').map(l =>
+    '<div class="card accent"><h3>Solicitud de '+esc(l.nutriName||'tu nutricionista')+'</h3>' +
+    '<p class="sub" style="margin-bottom:12px">Quiere leer tus datos de WorkOut (entrenos, competiciones y peso) y anotarte pesos. Puedes retirar el permiso cuando quieras.</p>' +
+    '<div class="btn-row"><button class="btn secondary" data-act="rechazar" data-id="'+esc(l.id)+'">Rechazar</button><button class="btn" data-act="aceptar" data-id="'+esc(l.id)+'">Aceptar</button></div></div>').join('');
+}
 
 /* ---------- pantallas ---------- */
 function topBar(){
@@ -61,7 +92,7 @@ function vLogin(){
 }
 function vActivar(){
   return '<div class="app">'+topBar()+'<div class="content">' +
-    '<h1>Bienvenido</h1>' +
+    '<h1>Bienvenido</h1>' + solicitudesHtml() +
     '<div class="card"><h3>Soy nutricionista</h3><p class="sub" style="margin-bottom:14px">Podrás crear tus pacientes, marcar su semana de entreno y preparar sus menús.</p>' +
     '<button class="btn" data-act="activar">Activar modo nutricionista</button></div>' +
     '<div class="card"><h3>Soy paciente</h3><p class="sub">Tu nutricionista te dará acceso con tu correo. Cuando lo haga, tu menú aparecerá aquí.</p></div>' +
@@ -74,7 +105,7 @@ function vPacientes(){
         '<button class="row" data-act="abrir" data-id="'+esc(p.id)+'"><div class="avatar">'+esc((p.name||'?').trim().charAt(0).toUpperCase())+'</div>' +
         '<div class="grow"><b>'+esc(p.name)+'</b><p class="sub">'+esc([p.sex, p.heightCm ? p.heightCm+' cm' : '', p.goal].filter(Boolean).join(' · ') || 'Sin más datos')+'</p></div><span class="chev">›</span></button>').join('') + '</div>'
     : '<div class="empty">Todavía no tienes pacientes.<br>Crea el primero con el botón de abajo.</div>';
-  return '<div class="crumbs"><b>Pacientes</b></div><div class="content"><h1>Pacientes</h1>'+lista+
+  return '<div class="crumbs"><b>Pacientes</b></div><div class="content"><h1>Pacientes</h1>'+solicitudesHtml()+lista+
     '<button class="btn" data-act="nuevo">＋ Nuevo paciente</button></div>';
 }
 function vPaciente(){
@@ -95,9 +126,47 @@ function vResumen(p){
     '<div class="btn-row"><input id="kg" inputmode="decimal" placeholder="kg, por ejemplo 72,5" style="flex:2"><button class="btn" style="flex:1" data-act="guardarPeso">Guardar</button></div>' +
     msgHtml() +
     (w.length > 1 ? '<div class="hist">'+w.slice(1).map(x => fechaCorta(x.id)+': '+kgTxt(x.kg)+' kg').join(' · ')+'</div>' : '') + '</div>' +
+    vWorkOutCard(p) +
     '<div class="card"><h3>Datos</h3><p class="sub">'+esc([p.sex, p.birthYear ? 'nacido en '+p.birthYear : '', p.heightCm ? p.heightCm+' cm' : '', p.goal ? 'Objetivo: '+p.goal : ''].filter(Boolean).join(' · ') || 'Sin datos')+'</p>' +
     (p.notes ? '<p style="margin:8px 0 0">'+esc(p.notes)+'</p>' : '') + '</div>' +
     '<div class="btn-row"><button class="btn secondary" data-act="editar">Editar datos</button><button class="btn danger" data-act="borrar">Eliminar</button></div>';
+}
+function vWorkOutCard(p){
+  const l = linkDe(p.id);
+  let cuerpo;
+  if (!l || l.status === 'revoked' || l.status === 'rejected') {
+    cuerpo = (l ? '<p class="sub" style="margin-bottom:10px">'+(l.status==='rejected' ? 'El paciente rechazó la solicitud.' : 'El paciente retiró el permiso.')+'</p>' : '') +
+      '<p class="sub" style="margin-bottom:12px">Si el paciente usa WorkOut, puedes leer su semana, competiciones y peso, con su permiso.</p>' +
+      '<button class="btn ghost" data-act="vincular">🔗 Vincular con WorkOut</button>';
+  } else if (l.status === 'pending') {
+    cuerpo = '<p class="sub" style="margin-bottom:12px">Solicitud enviada a <b>'+esc(l.email)+'</b>. Falta que el paciente la acepte entrando en esta app con ese correo.</p>' +
+      '<button class="btn secondary" data-act="quitarVinculo" data-id="'+esc(l.id)+'">Cancelar solicitud</button>';
+  } else {
+    const w = S.wo[p.id];
+    let datos = '';
+    if (S.woMsg) datos = '<div class="msg err">'+esc(S.woMsg)+'</div>';
+    else if (!l.clubId) datos = '<p class="sub">Su cuenta no es de atleta en WorkOut: solo se comparte el peso.</p>';
+    else if (!w) datos = '<p class="sub">Cargando datos de WorkOut…</p>';
+    else {
+      const prox = w.comps.map(c => ({c, d:c.day||c.startDate})).filter(x => x.d >= iso(new Date())).sort((a,b)=>a.d<b.d?-1:1)[0];
+      datos = '<p class="sub">'+w.plans.length+' semanas de entreno'+(prox ? ' · Próxima competición: <b>'+esc(prox.c.name||'Competición')+'</b> el '+fechaCorta(prox.d)+(prox.c.category ? ' ('+esc(prox.c.category)+')' : '') : '')+'</p>';
+    }
+    cuerpo = '<div class="notice ok" style="margin-bottom:10px">✓ Vinculado con WorkOut</div>' + datos +
+      '<div class="btn-row" style="margin-top:12px"><button class="btn secondary" data-act="leerwo">Actualizar</button><button class="btn secondary" data-act="quitarVinculo" data-id="'+esc(l.id)+'">Quitar vínculo</button></div>';
+  }
+  return '<div class="card"><h3>WorkOut</h3>'+cuerpo+'</div>';
+}
+function vWorkOutSemana(p){
+  const l = linkDe(p.id), w = S.wo[p.id];
+  if (!l || l.status !== 'accepted' || !l.clubId) return '';
+  if (!w) return '<div class="card"><p class="sub">Cargando datos de WorkOut…</p></div>';
+  if (!w.plans.length) return '<div class="card"><p class="sub">Este atleta aún no tiene semanas en WorkOut.</p></div>';
+  const sel = S.woPlanId && w.plans.some(x => x.id === S.woPlanId) ? S.woPlanId : w.plans[0].id;
+  const comps = compsDeLaSemana(p.id);
+  return '<div class="card"><h3>Proponer desde WorkOut</h3><p class="sub" style="margin-bottom:10px">Elige qué semana de WorkOut corresponde a estas fechas y se rellenan los niveles según la carga de cada día. Después puedes corregirlos.</p>' +
+    '<div class="field"><label class="f" for="woplan">Semana de WorkOut</label><select id="woplan" data-act="woplan">'+w.plans.map(x => '<option value="'+esc(x.id)+'"'+(x.id===sel?' selected':'')+'>'+esc(nombrePlan(x))+'</option>').join('')+'</select></div>' +
+    (comps.length ? '<p class="sub" style="margin-bottom:10px">'+comps.map(x => '🏆 '+esc(x.c.name||'Competición')+' · '+DIAS[(new Date(x.d+'T00:00').getDay()+6)%7]).join('<br>')+'</p>' : '') +
+    '<button class="btn" data-act="proponer">Proponer niveles</button></div>';
 }
 function vSemana(p){
   const lv = S.levels || [0,0,0,0,0,0,0];
@@ -106,7 +175,7 @@ function vSemana(p){
     '<div class="weekrow"><div class="day">'+d+'<span class="sub">'+fechaCorta(sumaDias(S.weekStart,i)).slice(0,5)+'</span></div><div class="levels">' +
     [1,2,3,4].map(l => '<button data-l="'+l+'" data-act="nivel" data-d="'+i+'" aria-pressed="'+(lv[i]===l)+'"><span class="bars"><i></i><i></i><i></i><i></i></span>'+NIVELES[l-1]+'</button>').join('') +
     '</div></div>').join('');
-  return '<div class="weekhead"><button class="btn secondary" data-act="semana" data-n="-7" aria-label="Semana anterior">‹</button>' +
+  return vWorkOutSemana(p) + '<div class="weekhead"><button class="btn secondary" data-act="semana" data-n="-7" aria-label="Semana anterior">‹</button>' +
     '<div class="t">'+fechaCorta(S.weekStart).slice(0,5)+' – '+fechaCorta(fin).slice(0,5)+'</div>' +
     '<button class="btn secondary" data-act="semana" data-n="7" aria-label="Semana siguiente">›</button></div>' +
     '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+msgHtml();
@@ -117,6 +186,9 @@ function vRecetario(){
 function vCuenta(){
   return '<div class="crumbs"><b>Cuenta</b></div><div class="content"><h1>Cuenta</h1>' +
     '<div class="card"><p class="sub">Sesión iniciada como</p><b>'+esc(S.user.email)+'</b></div>' +
+    S.requests.filter(l => l.status === 'accepted').map(l =>
+      '<div class="card"><p class="sub">'+esc(l.nutriName||'Un nutricionista')+' puede leer tus datos de WorkOut y anotarte pesos.</p>' +
+      '<button class="btn danger" style="margin-top:10px" data-act="retirar" data-id="'+esc(l.id)+'">Retirar permiso</button></div>').join('') +
     '<div class="card"><p class="sub">Versión '+esc(versionTexto())+'</p><button class="btn secondary" style="margin-top:10px" data-act="recargar">🔄 Recargar app</button></div>' +
     '<button class="btn danger" data-act="salir">Salir</button></div>';
 }
@@ -158,11 +230,43 @@ async function cargarPacientes(){
   S.patients = snap.docs.map(d => Object.assign({id:d.id}, d.data()))
     .sort((a,b) => String(a.name||'').localeCompare(String(b.name||''),'es'));
 }
+async function cargarLinks(){
+  const snap = await db.collection('nu_links').where('ownerUid','==',S.user.uid).get();
+  S.links = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
+}
+async function cargarSolicitudes(){
+  const snap = await db.collection('nu_links').where('email','==',(S.user.email||'').toLowerCase()).get();
+  S.requests = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
+}
+async function leerWorkOut(pid){
+  const l = linkDe(pid);
+  S.woMsg = null;
+  if (!l || l.status !== 'accepted' || !l.clubId || !l.patientUid) { render(); return; }
+  try {
+    const base = db.collection('clubs').doc(l.clubId).collection('athletes').doc(l.patientUid);
+    const r = await Promise.all([base.collection('plans').get(), base.collection('competitions').get(), base.collection('progress').doc('profile').get()]);
+    S.wo[pid] = {
+      plans: r[0].docs.map(d => Object.assign({id:d.id}, d.data())).sort((a,b) => (b.uploadedAt||0)-(a.uploadedAt||0)),
+      comps: r[1].docs.map(d => Object.assign({id:d.id}, d.data())),
+      metrics: r[2].exists && Array.isArray(r[2].data().metrics) ? r[2].data().metrics : []
+    };
+  } catch(e){ S.woMsg = 'No se pudo leer WorkOut ('+((e && (e.code||e.message)) || 'error')+').'; console.error('wo', e); }
+}
 async function cargarPesos(){
   // Sin orderBy: se leen todos (pocos) y se ordenan aquí, por si falla el orden en el servidor.
   const snap = await refPac(S.pid).collection('weights').get();
   S.weights = snap.docs.map(d => Object.assign({id:d.id}, d.data()))
-    .sort((a,b) => a.id < b.id ? 1 : -1).slice(0, 8);
+    .sort((a,b) => a.id < b.id ? 1 : -1);
+  const w = S.wo[S.pid];
+  if (w) {
+    const propios = {}; S.weights.forEach(x => propios[x.id] = true);
+    w.metrics.filter(m => m && m.peso != null && m.date).forEach(m => {
+      const id = new Date(m.date).toISOString().slice(0,10);
+      if (!propios[id]) S.weights.push({id, kg:m.peso, by:'workout'});
+    });
+    S.weights.sort((a,b) => a.id < b.id ? 1 : -1);
+  }
+  S.weights = S.weights.slice(0, 8);
 }
 async function cargarSemana(){
   const d = await refPac(S.pid).collection('weeks').doc(S.weekStart).get();
@@ -171,6 +275,7 @@ async function cargarSemana(){
 async function abrirPaciente(id){
   S.pid = id; S.ptab = 'resumen'; S.weights = []; S.levels = null; S.weekStart = lunesISO(new Date()); setMsg(null);
   render();
+  const l0 = linkDe(id); if (l0 && l0.status === 'accepted') await leerWorkOut(id);
   try { await cargarPesos(); } catch(e){ setMsg('No se pudo leer el peso (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('pesos', e); }
   render();
 }
@@ -194,6 +299,11 @@ async function guardarPeso(){
   if (!(kg >= 20 && kg <= 300)){ setMsg('Escribe un peso entre 20 y 300 kg.', false); render(); return; }
   try {
     await refPac(S.pid).collection('weights').doc(iso(new Date())).set({kg:Math.round(kg*10)/10, by:'nutricion', byUid:S.user.uid, at:firebase.firestore.FieldValue.serverTimestamp()});
+    const l = linkDe(S.pid);
+    if (l && l.status === 'accepted' && l.patientUid) {
+      try { await db.collection('users').doc(l.patientUid).collection('bodyLog').doc(iso(new Date())).set({kg:Math.round(kg*10)/10, by:'nutricion', byUid:S.user.uid, at:firebase.firestore.FieldValue.serverTimestamp()}); }
+      catch(e){ console.error('bodyLog', e); }
+    }
     setMsg('Guardado.', true); await cargarPesos();
   } catch(e){ setMsg('No se pudo guardar (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('peso', e); }
   render();
@@ -226,6 +336,67 @@ async function borrarSeguro(){
   render();
 }
 
+/* ---------- acciones de vínculo ---------- */
+function dlgVinculo(){
+  abrirDlg('<h2>Vincular con WorkOut</h2><p class="sub" style="margin-bottom:14px">Escribe el correo con el que el paciente entra en WorkOut. Recibirá una solicitud al entrar en esta app y decidirá si la acepta.</p>' +
+    '<div class="field"><label class="f" for="v_email">Correo del paciente</label><input id="v_email" type="email" inputmode="email" autocomplete="off"></div>' +
+    '<div class="msg err" id="v_msg"></div>' +
+    '<div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn" data-act="guardarVinculo">Enviar solicitud</button></div>');
+}
+async function guardarVinculo(){
+  const email = ($('#v_email').value || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { $('#v_msg').textContent = 'Escribe un correo válido.'; return; }
+  try {
+    const viejos = S.links.filter(l => l.patientId === S.pid);
+    for (const l of viejos) await db.collection('nu_links').doc(l.id).delete();
+    await db.collection('nu_links').add({ownerUid:S.user.uid, patientId:S.pid, email, status:'pending',
+      nutriName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now()});
+    cerrarDlg(); await cargarLinks();
+  } catch(e){ $('#v_msg').textContent = 'No se pudo enviar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
+  render();
+}
+async function quitarVinculo(id){
+  try { await db.collection('nu_links').doc(id).delete(); delete S.wo[S.pid]; await cargarLinks(); await cargarPesos(); }
+  catch(e){ setMsg('No se pudo quitar ('+((e && (e.code||e.message)) || 'error')+').', false); }
+  render();
+}
+async function aceptar(id){
+  const l = S.requests.find(x => x.id === id); if (!l) return;
+  try {
+    const g = await db.collection('users').doc(S.user.uid).collection('roleGrants').doc('athlete').get();
+    const clubId = g.exists ? (g.data().clubId || null) : null;
+    await db.collection('users').doc(S.user.uid).collection('shares').doc(l.ownerUid).set({active:true, canWriteWeight:true, clubId, at:firebase.firestore.FieldValue.serverTimestamp()});
+    await db.collection('nu_links').doc(id).update({status:'accepted', patientUid:S.user.uid, clubId, acceptedAt:Date.now()});
+    await cargarSolicitudes(); setMsg(null);
+  } catch(e){ setMsg('No se pudo aceptar ('+((e && (e.code||e.message)) || 'error')+').', false); console.error('aceptar', e); }
+  render();
+}
+async function rechazar(id){
+  try { await db.collection('nu_links').doc(id).update({status:'rejected'}); await cargarSolicitudes(); }
+  catch(e){ setMsg('No se pudo rechazar ('+((e && (e.code||e.message)) || 'error')+').', false); }
+  render();
+}
+async function retirar(id){
+  const l = S.requests.find(x => x.id === id); if (!l) return;
+  try {
+    await db.collection('users').doc(S.user.uid).collection('shares').doc(l.ownerUid).delete();
+    await db.collection('nu_links').doc(id).update({status:'revoked'});
+    await cargarSolicitudes();
+  } catch(e){ setMsg('No se pudo retirar ('+((e && (e.code||e.message)) || 'error')+').', false); }
+  render();
+}
+async function proponer(){
+  const w = S.wo[S.pid]; if (!w) return;
+  const sel = ($('#woplan') && $('#woplan').value) || S.woPlanId || (w.plans[0] && w.plans[0].id);
+  S.woPlanId = sel;
+  const plan = w.plans.find(x => x.id === sel); if (!plan) return;
+  const lv = nivelesDePlan(plan);
+  compsDeLaSemana(S.pid).forEach(x => { const i = Math.round((new Date(x.d+'T00:00') - new Date(S.weekStart+'T00:00'))/86400000); if (i >= 0 && i < 7) lv[i] = 4; });
+  S.levels = lv; setMsg('Niveles propuestos desde '+nombrePlan(plan)+'. Corrígelos si hace falta.', true); render();
+  try { await refPac(S.pid).collection('weeks').doc(S.weekStart).set({levels:lv, source:'workout:'+sel, updatedAt:firebase.firestore.FieldValue.serverTimestamp()}, {merge:true}); }
+  catch(e){ setMsg('No se pudo guardar la semana ('+((e && (e.code||e.message)) || 'error')+').', false); render(); }
+}
+
 /* ---------- cuenta ---------- */
 function traducirError(e){
   const c = (e && e.code) || '';
@@ -253,7 +424,7 @@ async function olvido(){
 async function activar(){
   try {
     await db.collection('users').doc(S.user.uid).collection('roleGrants').doc('nutritionist').set({createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-    S.isNutri = true; await cargarPacientes(); S.view = 'app'; S.tab = 'pacientes'; setMsg(null);
+    S.isNutri = true; await cargarPacientes(); S.links = []; S.view = 'app'; S.tab = 'pacientes'; setMsg(null);
   } catch(e){ setMsg('No se pudo activar. Puede faltar publicar las reglas nuevas en Firebase.', false); }
   render();
 }
@@ -288,8 +459,17 @@ document.addEventListener('click', e => {
     case 'nivel': ponerNivel(parseInt(t.dataset.d,10), parseInt(t.dataset.l,10)); break;
     case 'semana': cambiarSemana(parseInt(t.dataset.n,10)); break;
     case 'recargar': recargar(); break;
+    case 'vincular': dlgVinculo(); break;
+    case 'guardarVinculo': guardarVinculo(); break;
+    case 'quitarVinculo': quitarVinculo(t.dataset.id); break;
+    case 'aceptar': aceptar(t.dataset.id); break;
+    case 'rechazar': rechazar(t.dataset.id); break;
+    case 'retirar': retirar(t.dataset.id); break;
+    case 'leerwo': leerWorkOut(S.pid).then(() => cargarPesos()).then(render); break;
+    case 'proponer': proponer(); break;
   }
 });
+document.addEventListener('change', e => { if (e.target && e.target.id === 'woplan') S.woPlanId = e.target.value; });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && S.view === 'login' && e.target.id === 'pw') entrar(false); });
 
 /* ---------- aviso de versión nueva ---------- */
@@ -318,7 +498,8 @@ auth.onAuthStateChanged(async u => {
     if (!ud.exists) await ur.set({email:u.email, name:u.displayName || (u.email||'').split('@')[0], createdAt:Date.now()});
     const g = await ur.collection('roleGrants').doc('nutritionist').get();
     S.isNutri = g.exists;
-    if (S.isNutri) { await cargarPacientes(); S.view = 'app'; S.tab = 'pacientes'; }
+    try { await cargarSolicitudes(); } catch(e){ S.requests = []; }
+    if (S.isNutri) { await cargarPacientes(); try { await cargarLinks(); } catch(e){ S.links = []; } S.view = 'app'; S.tab = 'pacientes'; }
     else S.view = 'activar';
   } catch(e){ S.view = 'activar'; setMsg('No se pudieron leer tus datos. Comprueba la conexión.', false); }
   render();
