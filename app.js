@@ -904,10 +904,10 @@ function vPdf(p){
   h += '<section><h2>Cómo cuadra el menú con la semana de entreno</h2>'+explicacionSemana(p, ds, rs)+'</section>';
   if (rs.nMenu) {
     h += '<section><h2>Resumen</h2><div class="kpis"><div><span>Objetivo medio</span><b>'+fmtN(rs.objMedio)+' kcal</b></div><div><span>Menú medio</span><b>'+fmtN(rs.menuMedio)+' kcal</b></div><div><span>Cubierto</span><b>'+Math.round(rs.cobertura*100)+' %</b></div><div><span>Balance semanal</span><b>'+(rs.balance >= 0 ? '+' : '−')+fmtN(Math.abs(rs.balance))+' kcal</b></div></div>' +
-      '<h3>Lectura rápida</h3>'+lecturaRapida(ds, rs, kg, PAL_PDF)+'<div class="g2"><div><h3>Energía por día (kcal)</h3>'+chartKcal(ds, PAL_PDF)+leyendaKcal(PAL_PDF, hayR)+'</div>' +
+      '<h3>Lectura rápida</h3>'+lecturaRapida(ds, rs, kg, PAL_PDF)+'</section></div><div class="pgrp">'+hd+'<section><div class="g2"><div><h3>Energía por día (kcal)</h3>'+chartKcal(ds, PAL_PDF)+leyendaKcal(PAL_PDF, hayR)+'</div>' +
       '<div><h3>Macros: necesarios y en el menú</h3>'+barrasMacros(ds, PAL_PDF, kg)+'</div></div>' +
-      '</section></div><div class="pgrp">'+hd+'<section><div class="g2"><div><h3>Macros día a día</h3>'+chartMacrosDia(ds, PAL_PDF)+leyendaMacros(PAL_PDF)+'</div><div><h3>Cifras por día</h3>'+tablaCifras(ds, PAL_PDF)+'</div></div></section>';
-    h += '<section><h2>Pautas a seguir</h2><ul>'+pautasAuto(p, ds, rs).map(x => '<li>'+x+'</li>').join('')+'</ul>' +
+      '<div class="g2"><div><h3>Macros día a día</h3>'+chartMacrosDia(ds, PAL_PDF)+leyendaMacros(PAL_PDF)+'</div><div><h3>Cifras por día</h3>'+tablaCifras(ds, PAL_PDF)+'</div></div></section>';
+    h += '</div><div class="pgrp">'+hd+'<section><h2>Pautas a seguir</h2><ul>'+pautasAuto(p, ds, rs).map(x => '<li>'+x+'</li>').join('')+'</ul>' +
     (S.notas && S.notas.trim() ? '<h3>Notas del nutricionista</h3><p style="white-space:pre-wrap">'+esc(S.notas.trim())+'</p>' : '')+'</section>';
 
     h += seguimientoPdf(p);
