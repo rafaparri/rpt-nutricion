@@ -1,0 +1,14 @@
+/* Ajustes propios de RPT Nutrición (lo común está en rpt-ui) */
+.app{min-height:100dvh}
+.login{max-width:420px;margin:0 auto;padding:40px var(--pad);display:flex;flex-direction:column;gap:var(--gap)}
+.login .appicon{width:64px;height:64px;font-size:34px;border-radius:18px}
+.center{text-align:center}
+.msg{font-size:var(--fs-small);min-height:20px}
+.msg.err{color:var(--t-bad-fg)} .msg.ok{color:var(--t-good-fg)}
+.linkbtn{background:none;border:0;color:var(--t-accent2);font:700 var(--fs-small) var(--font);text-decoration:underline;cursor:pointer;padding:8px;min-height:44px}
+.weekhead{display:flex;align-items:center;gap:8px}
+.weekhead .btn{width:52px;padding:0;flex:none}
+.weekhead .t{flex:1;text-align:center;font-family:var(--font-title)}
+.bigw{font-family:var(--font-title);font-size:38px;color:var(--t-accent2)}
+.hist{color:var(--t-muted2);font-size:var(--fs-small)}
+.empty{color:var(--t-muted2);text-align:center;padding:24px 8px}
