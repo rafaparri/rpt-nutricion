@@ -919,7 +919,7 @@ function vRecetario(){
   const filas = f.length ? '<div class="list">' + f.map(r =>
     '<button class="row" data-act="verReceta" data-id="'+esc(r.id)+'"><div class="avatar">🍽</div><div class="grow"><b>'+esc(r.name)+'</b>' +
     '<p class="sub">'+esc(macrosTxt(r))+' por ración</p>' +
-    '<p class="sub">'+esc([r.category, r.useIn].filter(Boolean).join(' · '))+(S.rtab==='mias' && r.shared ? ' · 🔗 compartida' : '')+(S.rtab==='compartidas' ? ' · de '+esc(r.ownerName||'otro nutricionista') : '')+'</p></div><span class="chev">›</span></button>').join('') + '</div>'
+    (r.sinContar && r.sinContar.length ? '<p class="sub" style="color:var(--t-bad-fg);font-weight:700">⚠ Macros incompletos: sin contar '+esc(r.sinContar.join(', '))+'</p>' : '') + '<p class="sub">'+esc([r.category, r.useIn].filter(Boolean).join(' · '))+(S.rtab==='mias' && r.shared ? ' · 🔗 compartida' : '')+(S.rtab==='compartidas' ? ' · de '+esc(r.ownerName||'otro nutricionista') : '')+'</p></div><span class="chev">›</span></button>').join('') + '</div>'
     : '<div class="empty">'+(lista.length ? 'Ninguna receta coincide con la búsqueda.' : (S.rtab==='compartidas' ? 'Todavía nadie ha compartido recetas.' : 'Todavía no tienes recetas.<br>Crea una o importa fichas de Word.'))+'</div>';
   return '<div class="crumbs"><b>Recetario</b></div><div class="content"><h1>Recetario</h1>' +
     '<div class="tabs" role="tablist"><button role="tab" data-act="rtab" data-v="mias" aria-selected="'+(S.rtab==='mias')+'">Mis recetas ('+S.recipes.length+')</button>' +
@@ -1160,7 +1160,7 @@ function calcReceta(){
   const e = RPT_RECETAS.estimarMacros(lineas, serv);
   $('#r_kcal').value = e.kcal; $('#r_p').value = kgTxt(e.prot); $('#r_c').value = kgTxt(e.carb); $('#r_g').value = kgTxt(e.grasa); $('#r_w').value = e.peso;
   $('#r_msg').className = 'msg ' + (e.noReconocidos.length ? 'err' : 'ok');
-  $('#r_msg').textContent = e.noReconocidos.length ? 'Calculado. No se han reconocido: '+e.noReconocidos.join(', ')+'.' : 'Calculado.';
+  $('#r_msg').textContent = e.noReconocidos.length ? '⚠ OJO: estos ingredientes NO se han contado, así que los macros están incompletos: '+e.noReconocidos.join(', ')+'. Escribe sus valores de la etiqueta por 100 g al final de la línea, así: «250 g secreto de cerdo [146/19,1/0,5/7,5]» (kcal / proteína / hidratos / grasa) y vuelve a calcular.' : 'Calculado.';
 }
 async function guardarReceta(id){
   const name = ($('#r_name').value || '').trim();
@@ -1174,7 +1174,8 @@ async function guardarReceta(id){
   }
   const datos = { name, servings:Math.max(parseInt($('#r_serv').value, 10) || 1, 1), useIn:($('#r_use').value || '').trim(), ingredients:ing,
     prep:($('#r_prep').value || '').trim(), kcal, prot, carb, fat, weight:peso,
-    category:RPT_RECETAS.categorizar(kcal, prot, carb, fat), shared:$('#r_sh').checked, updatedMs:Date.now() };
+    category:RPT_RECETAS.categorizar(kcal, prot, carb, fat), shared:$('#r_sh').checked, updatedMs:Date.now(),
+    sinContar:RPT_RECETAS.estimarMacros(ing, Math.max(parseInt($('#r_serv').value, 10) || 1, 1)).noReconocidos };
   try {
     let nuevoId = null;
     if (id) await db.collection('nu_recipes').doc(id).update(datos);

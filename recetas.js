@@ -16,6 +16,9 @@ const EXTRA_FOODS = {
   "pan integral": [247,13,41,3.4,30], "pan de molde": [265,8,49,3.5,25], "tortita de arroz": [387,8,82,3,9],
   "arroz integral": [350,7.5,77,2.7,185], "cuscus": [376,13,77,0.6,100], "copos de maiz": [357,7,84,0.9,30],
   "muesli": [360,10,66,6,40], "galleta": [450,6,70,16,8], "cacao": [228,20,58,14,10], "chocolate negro": [546,5,61,31,10],
+  "secreto de cerdo": [146,19.1,0.5,7.5,100], "presa de cerdo": [180,19,0,11,100], "pluma de cerdo": [190,19,0,12.5,100],
+  "solomillo de cerdo": [143,21,0,6,100], "lomo de cerdo": [143,22,0,6,100], "cinta de lomo": [157,21,0,8,100], "chuleta de cerdo": [190,20,0,12,100],
+  "carrillera de cerdo": [200,21,0,13,100], "paletilla de cerdo": [190,19,0,13,100], "magro de cerdo": [150,21,0,7,100], "carne de cerdo": [180,20,0,11,100], "cerdo": [180,20,0,11,100],
   "pechuga de pavo": [104,22,0.5,1.7,100], "pavo": [104,22,0.5,1.7,100], "jamon york": [107,17,1,4,20], "lomo": [143,22,0,6,100],
   "clara": [52,11,0.7,0.2,33], "queso fresco": [98,11,3.5,4.5,125], "requeson": [98,11,3.4,4.3,100], "queso crema": [342,6,4,34,20],
   "tofu": [76,8,1.9,4.8,100], "mantequilla": [717,0.9,0.1,81,10], "nata": [345,2,3,36,15], "leche desnatada": [35,3.4,5,0.1,200],
@@ -126,16 +129,30 @@ function gramosIndicados(linea){
 }
 
 /* Calorías y macros de UNA ración, a partir de las líneas de ingredientes. */
+/* Valores propios por 100 g escritos en la línea: «250 g secreto de cerdo [146/19,1/0,5/7,5]»
+   = kcal / proteína / hidratos / grasa por cada 100 g (los de la etiqueta). */
+const RE_PROPIOS = /\[\s*(\d+[.,]?\d*)\s*[\/;]\s*(\d+[.,]?\d*)\s*[\/;]\s*(\d+[.,]?\d*)\s*[\/;]\s*(\d+[.,]?\d*)\s*\]/;
+function valoresPropios(linea){
+  const m = linea.match(RE_PROPIOS); if (!m) return {linea, v:null};
+  const n = x => parseFloat(x.replace(',', '.'));
+  return {linea: linea.replace(RE_PROPIOS, '').replace(/\s+/g, ' ').trim(), v:[n(m[1]), n(m[2]), n(m[3]), n(m[4])]};
+}
 function estimarMacros(lineas, raciones){
   raciones = raciones || RACIONES_DEF;
   let kcal = 0, prot = 0, carb = 0, grasa = 0, gramosTot = 0;
   const noRec = [];
-  lineas.forEach(linea => {
-    if (!linea.trim()) return;
+  lineas.forEach(linea0 => {
+    if (!linea0.trim()) return;
+    const pr = valoresPropios(linea0), linea = pr.linea;
     let [cantidad, unidad, nombre] = parseIngrediente(linea);
     const nn = normalizar(nombre);
     if (!nn || esIgnorable(nn)) return;
-    const clave = buscarIngrediente(nn);
+    const clave = pr.v ? null : buscarIngrediente(nn);
+    if (pr.v) {
+      const g = (unidad && Object.prototype.hasOwnProperty.call(UNIDADES, unidad)) ? (cantidad === null ? 1 : cantidad) * UNIDADES[unidad] : gramosIndicados(linea);
+      if (!g) { noRec.push(capitalize(nombre.trim()) + ' (falta la cantidad en g)'); return; }
+      const f = g / 100; kcal += pr.v[0]*f; prot += pr.v[1]*f; carb += pr.v[2]*f; grasa += pr.v[3]*f; gramosTot += g; return;
+    }
     if (clave === null) {
       noRec.push(capitalize(nombre.trim()));
       const g = gramosIndicados(linea); if (g) gramosTot += g;
@@ -318,6 +335,7 @@ const CATS_COMPRA = [
 ];
 function categoriaCompra(nn){ for (const [c, re] of CATS_COMPRA) if (re.test(nn)) return c; return 'Otros'; }
 function ingredienteCompra(linea){
+  linea = valoresPropios(linea).linea;
   let [cantidad, unidad, nombre] = parseIngrediente(linea);
   const nn = normalizar(nombre);
   if (!nn || esIgnorable(nn)) return null;
