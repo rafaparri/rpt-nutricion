@@ -54,6 +54,15 @@ function nivelesDePlan(plan){
   const max = Math.max.apply(null, c);
   return c.map(x => x <= 0 ? 1 : (x >= 0.75*max ? 4 : (x >= 0.4*max ? 3 : 2)));
 }
+// Aplica los días que el atleta pasó de uno a otro ("pasar el entreno del jueves al viernes")
+function planConMovimientos(plan, moves){
+  const days = {}; DIAKEYS.forEach(k => days[k] = (plan.days && plan.days[k] || []).slice());
+  DIAKEYS.forEach(src => {
+    const dst = moves && moves[plan.id + '|' + src];
+    if (dst && dst !== src && days[dst] && days[src].length) { days[dst] = days[dst].concat(days[src]); days[src] = []; }
+  });
+  return Object.assign({}, plan, {days});
+}
 function nombrePlan(p){ return (p.meta && p.meta.week != null) ? 'Semana '+p.meta.week : (p.id || 'Plan'); }
 function compsDeLaSemana(pid){
   const w = S.wo[pid]; if (!w) return [];
@@ -248,7 +257,8 @@ async function leerWorkOut(pid){
     S.wo[pid] = {
       plans: r[0].docs.map(d => Object.assign({id:d.id}, d.data())).sort((a,b) => (b.uploadedAt||0)-(a.uploadedAt||0)),
       comps: r[1].docs.map(d => Object.assign({id:d.id}, d.data())),
-      metrics: r[2].exists && Array.isArray(r[2].data().metrics) ? r[2].data().metrics : []
+      metrics: r[2].exists && Array.isArray(r[2].data().metrics) ? r[2].data().metrics : [],
+      moves: r[2].exists && r[2].data().moves && typeof r[2].data().moves === 'object' ? r[2].data().moves : {}
     };
   } catch(e){ S.woMsg = 'No se pudo leer WorkOut ('+((e && (e.code||e.message)) || 'error')+').'; console.error('wo', e); }
 }
@@ -390,7 +400,7 @@ async function proponer(){
   const sel = ($('#woplan') && $('#woplan').value) || S.woPlanId || (w.plans[0] && w.plans[0].id);
   S.woPlanId = sel;
   const plan = w.plans.find(x => x.id === sel); if (!plan) return;
-  const lv = nivelesDePlan(plan);
+  const lv = nivelesDePlan(planConMovimientos(plan, w.moves));
   compsDeLaSemana(S.pid).forEach(x => { const i = Math.round((new Date(x.d+'T00:00') - new Date(S.weekStart+'T00:00'))/86400000); if (i >= 0 && i < 7) lv[i] = 4; });
   S.levels = lv; setMsg('Niveles propuestos desde '+nombrePlan(plan)+'. Corrígelos si hace falta.', true); render();
   try { await refPac(S.pid).collection('weeks').doc(S.weekStart).set({levels:lv, source:'workout:'+sel, updatedAt:firebase.firestore.FieldValue.serverTimestamp()}, {merge:true}); }
