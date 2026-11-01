@@ -29,7 +29,7 @@ const S = {
   view:'boot',            // boot | login | activar | app
   user:null, isNutri:false,
   tab:'pacientes',        // pacientes | recetario | cuenta
-  patients:[], pid:null, ptab:'resumen',
+  patients:[], pid:null, ptab:'menu', side:false, compraOn:false, menuBase:null,
   weights:[], weekStart:lunesISO(new Date()), levels:null,
   links:[], requests:[], wo:{}, woPlanId:null, woMsg:null,
   recipes:[], sharedRecipes:[], rtab:'mias', rq:'', cola:[], rmsg:null,
@@ -37,6 +37,7 @@ const S = {
   msg:null, msgOk:false, busy:false
 };
 const refPac = pid => db.collection('nu_patients').doc(pid);
+try { S.side = window.innerWidth >= 900 && localStorage.getItem('nu_side') !== '0'; } catch(e){ S.side = window.innerWidth >= 900; }
 const pacienteActual = () => S.patients.find(p => p.id === S.pid);
 
 /* ---------- vínculo con WorkOut ---------- */
@@ -82,13 +83,22 @@ function solicitudesHtml(){
 
 /* ---------- pantallas ---------- */
 function topBar(){
-  return '<header class="topbar"><div class="brand"><span class="appicon">🥗</span><span>Nutrición</span></div>' +
+  return '<header class="topbar">' + (S.view === 'app' ? '<button class="menubtn" data-act="side" aria-label="Abrir o cerrar el menú">☰</button>' : '') +
+    '<div class="brand"><span class="appicon">🥗</span><span>Nutrición</span></div>' +
     (S.user ? '<button class="user" data-act="tab" data-v="cuenta">'+esc((S.user.email||'').split('@')[0])+' ▾</button>' : '') + '</header>';
 }
-function bottomNav(){
-  const items = [['pacientes','👥','Pacientes'],['recetario','📖','Recetario'],['cuenta','⚙️','Cuenta']];
-  return '<nav class="bottomnav">' + items.map(i =>
-    '<button data-act="tab" data-v="'+i[0]+'"'+(S.tab===i[0]&&!S.pid?' aria-current="page"':'')+'><span class="ico">'+i[1]+'</span>'+i[2]+'</button>').join('') + '</nav>';
+/* Menú lateral: lo que son datos de base (paciente, recetario, cuenta). Se puede ocultar. */
+function sideHtml(){
+  if (S.view !== 'app') return '';
+  const p = S.pid ? pacienteActual() : null;
+  const it = (act, v, ico, txt, cur) => '<button class="sitem" data-act="'+act+'" data-v="'+v+'"'+(cur ? ' aria-current="page"' : '')+'><span class="ico">'+ico+'</span><span>'+txt+'</span></button>';
+  return '<div class="sidebk" data-act="side"></div><aside class="side'+(S.side ? ' open' : '')+'" aria-label="Menú">' +
+    '<div class="sidehead"><b>Menú</b><button class="btn small secondary" data-act="side" aria-label="Cerrar el menú">✕</button></div>' +
+    it('tab', 'pacientes', '👥', 'Pacientes', S.tab === 'pacientes' && !(p && S.ptab === 'datos')) +
+    (p ? '<div class="sgroup">Paciente: '+esc(p.name)+'</div>' + it('sideDatos', 'datos', '📋', 'Datos, peso y WorkOut', S.tab === 'pacientes' && S.ptab === 'datos') : '') +
+    '<div class="sgroup">Base</div>' +
+    it('tab', 'recetario', '📖', 'Recetario', S.tab === 'recetario') +
+    it('tab', 'cuenta', '⚙️', 'Cuenta', S.tab === 'cuenta') + '</aside>';
 }
 function msgHtml(){ return S.msg ? '<div class="msg '+(S.msgOk?'ok':'err')+'">'+esc(S.msg)+'</div>' : '<div class="msg"></div>'; }
 
@@ -124,12 +134,12 @@ function vPacientes(){
 function vPaciente(){
   const p = pacienteActual();
   if (!p) return '<div class="content"><div class="empty">Paciente no encontrado.</div></div>';
-  const tabs = '<div class="tabs" role="tablist"><button role="tab" data-act="ptab" data-v="resumen" aria-selected="'+(S.ptab==='resumen')+'">Resumen</button>' +
-    '<button role="tab" data-act="ptab" data-v="semana" aria-selected="'+(S.ptab==='semana')+'">Semana</button>' +
-    '<button role="tab" data-act="ptab" data-v="informe" aria-selected="'+(S.ptab==='informe')+'">Informe</button></div>';
+  const t = (v, txt) => '<button role="tab" data-act="ptab" data-v="'+v+'" aria-selected="'+(S.ptab===v)+'">'+txt+'</button>';
+  const tabs = '<div class="tabs" role="tablist">'+t('entreno','Entreno')+t('menu','Menú')+t('informe','Informe')+(S.compraOn ? t('compra','🛒 Compra') : '')+'</div>';
+  const kg = kgDe();
+  const cuerpo = S.ptab==='datos' ? vResumen(p) : S.ptab==='entreno' ? vEntreno(p) : S.ptab==='informe' ? vInforme(p) : S.ptab==='compra' ? vCompraTab(p) : vMenuTab(p);
   return '<div class="crumbs"><a href="#" data-act="volver">Pacientes</a> › <b>'+esc(p.name)+'</b></div><div class="content">' +
-    '<button class="btn small secondary" style="width:fit-content" data-act="volver">‹ Volver</button><h1>'+esc(p.name)+'</h1>' + tabs +
-    (S.ptab==='resumen' ? vResumen(p) : S.ptab==='semana' ? vSemana(p) : vInforme(p)) + '</div>';
+    '<div class="pacthead"><h1>'+esc(p.name)+'</h1><button class="pesochip" data-act="pesoDlg" aria-label="Anotar peso">⚖️ '+(kg ? kgTxt(kg)+' kg' : 'Anotar peso')+'</button></div>' + tabs + cuerpo + '</div>';
 }
 function vResumen(p){
   const w = S.weights;
@@ -304,10 +314,11 @@ function candidatas(slot){
   const aptas = todas.filter(r => aptaPara(r, slot));
   return aptas.length ? aptas : todas;
 }
+const baseDeMenu = menu => menu.map(d => { const t = totalDia(d || {meals:[]}); return {kcal:Math.round(t.kcal), prot:Math.round(t.prot), carb:Math.round(t.carb), fat:Math.round(t.fat)}; });
 async function guardarMenu(){
   try {
     const limpio = JSON.parse(JSON.stringify(S.menu));
-    await refPac(S.pid).collection('weeks').doc(S.weekStart).set({menu:limpio, updatedAt:firebase.firestore.FieldValue.serverTimestamp()}, {merge:true});
+    await refPac(S.pid).collection('weeks').doc(S.weekStart).set(Object.assign({menu:limpio, updatedAt:firebase.firestore.FieldValue.serverTimestamp()}, S.menuBase ? {menuBase:S.menuBase} : {}), {merge:true});
     return true;
   } catch(e){ setMsg('No se pudo guardar el menú ('+((e && (e.code||e.message)) || 'error')+'). Lo que ves no está guardado.', false); console.error('menu', e); render(); return false; }
 }
@@ -347,7 +358,7 @@ async function proponerMenu(){
     if (obj) afinarDia(obj, meals, menu[i-1], usos);
     menu.push({meals});
   }
-  S.menu = menu; setMsg('Menú propuesto. Toca cualquier comida para cambiarla.', true); render(); await guardarMenu();
+  S.menu = menu; S.menuBase = baseDeMenu(menu); S.ptab = 'informe'; setMsg('Menú generado. Toca cualquier comida de la tabla para cambiarla y verás cómo cambian las kcal y los macros.', true); render(); window.scrollTo(0, 0); await guardarMenu();
 }
 /* Segunda pasada: ajusta el día ENTERO (no cada comida por separado) para que las kcal cuadren y
    la proteína no se quede corta ni la grasa se pase. Prueba otras recetas y raciones comida a comida. */
@@ -414,7 +425,7 @@ async function copiarDe(wid){
     const t = objetivosComidas(p, i, dia.meals || []); if (!t) return;
     dia.meals.forEach((m, j) => { const r = m.rid && recetaPorId(m.rid); if (r && t[j] && r.kcal > 0) m.s = escalaPara(r, t[j]); });
   });
-  S.menu = menu; cerrarDlg(); setMsg('Menú copiado de la semana del '+fechaCorta(wid).slice(0,5)+'. Toca cualquier comida para cambiarla.', true); render(); await guardarMenu();
+  S.menu = menu; S.menuBase = baseDeMenu(menu); cerrarDlg(); setMsg('Menú copiado de la semana del '+fechaCorta(wid).slice(0,5)+'. Toca cualquier comida para cambiarla.', true); render(); await guardarMenu();
 }
 const CERO = {kcal:0, prot:0, carb:0, fat:0, g:0};
 const valsReal = m => m.real ? (m.real.none ? CERO : valsComida(m.real)) : valsComida(m);
@@ -462,10 +473,11 @@ function vMenu(p){
   const hay = S.menu && S.menu.some(d => d.meals && d.meals.length);
   let html = '<div class="card"><h3>Menú de la semana</h3>' +
     '<p class="sub" style="margin-bottom:10px">'+(hay ? 'Toca una comida para cambiar la receta o la ración.' : 'La app propone una receta para cada comida, con la ración ajustada a las kcal y macros del día.')+'</p>' +
-    '<div class="btn-row"><button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Proponer de nuevo' : '✨ Proponer menú')+'</button><button class="btn secondary" data-act="repartoDlg">Reparto</button></div>' +
-    '<button class="btn secondary" style="margin-top:10px" data-act="copiarSemana">📋 Copiar de otra semana</button>' +
+    '<div class="btn-row"><button class="btn secondary" data-act="repartoDlg">Reparto</button><button class="btn secondary" data-act="copiarSemana">📋 Copiar de otra semana</button></div>' +
     '<button class="btn secondary" style="margin-top:10px" data-act="fijasDlg">📌 Comidas fijas'+(() => { const f = fijasDe(p), n = Object.keys(f).filter(k => f[k] && f[k].rid).length; return n ? ' ('+n+(fijasPropias(p) ? '' : ', por defecto')+')' : ''; })()+'</button></div>';
-  if (!hay) return html;
+  const btnGen = '<div class="card"><button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Generar menú de nuevo y ver la tabla' : '✨ Generar menú y ver la tabla')+'</button><p class="sub" style="margin-top:8px">Propone los platos de toda la semana y te lleva a Informe, donde ves el menú en tabla y puedes cambiar cualquier plato.</p>' +
+    (hay ? '<button class="btn secondary" style="margin-top:10px" data-act="ptab" data-v="informe">Ver la tabla</button>' : '') + '</div>';
+  if (!hay) return html + vMacros(p) + btnGen;
   html += DIAS.map((d, i) => {
     const dia = S.menu[i]; if (!dia || !dia.meals || !dia.meals.length) return '';
     const obj = objetivoDia(p, i), tot = totalDia(dia);
@@ -484,7 +496,7 @@ function vMenu(p){
       (hayReal(dia) ? (() => { const rt = totalReal(dia); return '<p class="sub" style="margin:-4px 0 8px;color:var(--t-accent2);font-weight:700">Real: '+Math.round(rt.kcal)+' kcal · P '+Math.round(rt.prot)+' · C '+Math.round(rt.carb)+' · G '+Math.round(rt.fat)+' ('+txtVariacion(tot, rt)+')</p>'; })() : '') +
       '<div class="list">'+filas+'</div></div>';
   }).join('');
-  return html;
+  return html + btnGen;
 }
 function dlgSlot(){
   const p = pacienteActual(), sl = S.slot; if (!p || !sl) return;
@@ -517,7 +529,11 @@ function dlgSlot(){
 }
 async function cambiarSlot(fn, cerrar, aviso, reabrir){
   const sl = S.slot; if (!sl) return;
+  const antes = totalDia(S.menu[sl.d]);
   fn(S.menu[sl.d].meals[sl.m]);
+  { const des = totalDia(S.menu[sl.d]); if (Math.abs(des.kcal - antes.kcal) + Math.abs(des.prot - antes.prot) + Math.abs(des.carb - antes.carb) + Math.abs(des.fat - antes.fat) > 0.5) {
+    const pp = pacienteActual(), ob = pp && objetivoDia(pp, sl.d);
+    aviso = (aviso || DIAS[sl.d]+' · '+S.menu[sl.d].meals[sl.m].slot+':') + ' Variación del día: '+txtVariacion(antes, des)+'. El día queda en '+fmtN(des.kcal)+(ob ? ' de '+ob.kcal : '')+' kcal · P '+Math.round(des.prot)+(ob ? '/'+ob.prot : '')+' · C '+Math.round(des.carb)+(ob ? '/'+ob.carb : '')+' · G '+Math.round(des.fat)+(ob ? '/'+ob.fat : '')+'.'; } }
   if (cerrar) { cerrarDlg(); S.slotQ = ''; S.realQ = ''; } else (reabrir || dlgSlot)();
   if (aviso) setMsg(aviso, true);
   render();
@@ -830,12 +846,38 @@ function vPdf(p){
   h += '<footer'+(rs.nMenu ? ' style="page:menu"' : '')+'>Generado el '+fechaCorta(iso(new Date()))+' con RPT Nutrición · Las cifras son estimaciones orientativas.</footer></div></div>';
   return h;
 }
+function tablaMenuApp(p){
+  const slots = []; (S.menu || []).forEach(d => (d && d.meals || []).forEach(m => { if (slots.indexOf(m.slot) < 0) slots.push(m.slot); }));
+  const cab = DIAS.map((d, i) => '<th>'+d.slice(0,3)+'<br><span style="font-weight:700;color:'+(S.levels && S.levels[i] ? LVL_COL[S.levels[i]-1] : 'var(--t-muted)')+'">'+(S.levels && S.levels[i] ? NIVELES[S.levels[i]-1] : '—')+'</span></th>').join('');
+  const celda = (i, sl) => { const d = S.menu[i], j = d && d.meals ? d.meals.findIndex(x => x.slot === sl) : -1; if (j < 0) return '<td></td>'; const m = d.meals[j];
+    if (!m.rid) return '<td class="cel" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'" tabindex="0" role="button"><span class="mut">＋ elegir</span></td>';
+    const v = valsComida(m);
+    return '<td class="cel" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'" tabindex="0" role="button"><b>'+esc(m.name)+'</b>'+(m.fija ? ' 📌' : '')+(m.real ? ' 🔁' : '')+'<br><span class="mut">×'+kgTxt(Math.round(m.s*100)/100)+' · '+Math.round(v.kcal)+' kcal</span><br><span class="mut">P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</span></td>'; };
+  const filas = slots.map(sl => '<tr><th class="sl">'+esc(sl)+'</th>'+DIAS.map((d, i) => celda(i, sl)).join('')+'</tr>').join('');
+  const tot = '<tr class="tot"><th class="sl">Total del día</th>'+DIAS.map((d, i) => {
+    const dia = S.menu[i], o = objetivoDia(p, i); if (!dia || !dia.meals || !dia.meals.some(m => m.rid)) return '<td class="mut">–</td>';
+    const t = totalDia(dia), b = S.menuBase && S.menuBase[i];
+    const pct = o ? t.kcal/o.kcal : 1, col = estado(pct, PAL_APP);
+    const dif = b ? Math.abs(t.kcal - b.kcal) + Math.abs(t.prot - b.prot) + Math.abs(t.carb - b.carb) + Math.abs(t.fat - b.fat) : 0;
+    return '<td><b style="color:'+col+'">'+fmtN(t.kcal)+' kcal</b>'+(o ? ' <span class="mut">('+Math.round(pct*100)+'%)</span>' : '')+'<br><span class="mut">obj. '+(o ? o.kcal : '?')+'</span><br><span class="mut">P '+Math.round(t.prot)+(o ? '/'+o.prot : '')+'<br>C '+Math.round(t.carb)+(o ? '/'+o.carb : '')+'<br>G '+Math.round(t.fat)+(o ? '/'+o.fat : '')+'</span>' +
+      (dif > 4 ? '<br><span class="chg">Desde el menú generado:<br>'+txtVariacion(b, t)+'</span>' : '') + '</td>'; }).join('')+'</tr>';
+  return '<div class="tscroll"><table class="mtabapp"><thead><tr><th class="sl"></th>'+cab+'</tr></thead><tbody>'+filas+tot+'</tbody></table></div>';
+}
+function vCompraTab(p){
+  const c = vCompra(false);
+  return cabSemana() + msgHtml() + (c || '<div class="card"><p class="sub">Esta semana aún no hay menú, así que no hay nada que comprar.</p></div>') +
+    '<button class="btn secondary" data-act="compraCerrar">Ocultar la lista de la compra</button>';
+}
 function vInforme(p){
   let h = cabSemana() + msgHtml();
+  if (S.menu && S.menu.some(d => d && d.meals && d.meals.some(m => m.rid))) {
+    h += '<div class="card"><h3>Menú de la semana</h3><p class="sub" style="margin-bottom:8px">Toca una comida para cambiarla. Abajo de cada día ves cómo queda frente al objetivo y cuánto ha cambiado desde que se generó el menú.</p>' + tablaMenuApp(p) +
+      '<div class="btn-row" style="margin-top:12px"><button class="btn secondary" data-act="compraAbrir">🛒 Lista de la compra</button><button class="btn" data-act="pdfAbrir">📄 Ver informe PDF</button></div></div>';
+  }
   if (!datosOk(p)) return h + '<div class="card"><p class="sub">Para calcular hace falta sexo, año de nacimiento, altura y un peso. Complétalo en Resumen.</p></div>';
-  if (!S.levels || !S.levels.some(x => x)) return h + '<div class="card"><p class="sub">Esta semana aún no tiene niveles de entreno. Ponlos en la pestaña Semana.</p></div>';
+  if (!S.levels || !S.levels.some(x => x)) return h + '<div class="card"><p class="sub">Esta semana aún no tiene niveles de entreno. Ponlos en la pestaña Entreno.</p></div>';
   const ds = datosSemana(p), rs = resumenSemana(ds), kg = kgDe(), hayR = ds.some(d => d.real);
-  if (!rs.nMenu) return h + '<div class="card"><p class="sub">Esta semana aún no tiene menú. Propónlo en la pestaña Semana y aquí verás los gráficos.</p></div>';
+  if (!rs.nMenu) return h + '<div class="card"><p class="sub" style="margin-bottom:10px">Esta semana aún no tiene menú. Genéralo en la pestaña Menú y aquí verás la tabla y los gráficos.</p><button class="btn" data-act="ptab" data-v="menu">Ir a Menú</button></div>';
   const bal = rs.balance, grasa = Math.abs(bal)/7.7;
   const colBal = Math.abs(bal) < 700 ? 'var(--t-good-fg)' : 'var(--t-chg-fg)';
   h += '<div class="card"><h3>Resumen de la semana</h3><div style="display:flex;flex-wrap:wrap;gap:8px">' +
@@ -848,22 +890,25 @@ function vInforme(p){
     '<div style="margin-top:10px">'+tablaCifras(ds, PAL_APP)+'</div></div>';
   h += '<div class="card"><h3>Macros: necesarios y en el menú</h3>' + barrasMacros(ds, PAL_APP, kg) + '</div>';
   h += '<div class="card"><h3>Macros día a día</h3>' + chartMacrosDia(ds, PAL_APP) + leyendaMacros(PAL_APP) + '</div>';
-  h += vCompra(false);
   h += '<div class="card"><h3>Informe en PDF</h3><p class="sub" style="margin-bottom:8px">Notas para el paciente: aparecerán en el informe, junto a las pautas automáticas.</p>' +
     '<div class="field"><label class="f" for="notas">Notas del nutricionista (esta semana)</label><textarea id="notas" rows="5" style="padding:12px 14px;line-height:1.4">'+esc(S.notas || '')+'</textarea></div>' +
     '<div class="btn-row"><button class="btn secondary" data-act="guardarNotas">Guardar notas</button><button class="btn" data-act="pdfAbrir">📄 Ver informe</button></div></div>';
   return h;
 }
-function vSemana(p){
+function vEntreno(p){
   const lv = S.levels || [0,0,0,0,0,0,0];
-  const fin = sumaDias(S.weekStart, 6);
   const filas = DIAS.map((d,i) =>
     '<div class="weekrow"><div class="day">'+d+'<span class="sub">'+fechaCorta(sumaDias(S.weekStart,i)).slice(0,5)+'</span></div><div class="levels">' +
     [1,2,3,4].map(l => '<button data-l="'+l+'" data-act="nivel" data-d="'+i+'" aria-pressed="'+(lv[i]===l)+'"><span class="bars"><i></i><i></i><i></i><i></i></span>'+NIVELES[l-1]+'</button>').join('') +
     '</div></div>').join('');
-  return vWorkOutSemana(p) + cabSemana() +
-    msgHtml() +
-    '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+vMacros(p)+vMenu(p);
+  return cabSemana() + msgHtml() + vWorkOutSemana(p) +
+    '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar. Es el punto de partida del menú.</p>'+filas+'</div>' +
+    '<button class="btn" data-act="ptab" data-v="menu">Seguir con el menú ›</button>';
+}
+function vMenuTab(p){
+  const hayNiv = S.levels && S.levels.some(x => x);
+  if (!hayNiv) return cabSemana() + msgHtml() + '<div class="card"><h3>Menú de la semana</h3><p class="sub" style="margin-bottom:12px">Para preparar el menú necesito saber la intensidad de entreno de cada día de esta semana.</p><button class="btn" data-act="ptab" data-v="entreno">Ir a Entreno</button></div>';
+  return cabSemana() + msgHtml() + vMenu(p);
 }
 function norm(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
 const macrosTxt = r => (r.kcal||0)+' kcal · P '+kgTxt(r.prot||0)+' · C '+kgTxt(r.carb||0)+' · G '+kgTxt(r.fat||0);
@@ -899,8 +944,8 @@ function render(){
   else if (S.view === 'login') html = vLogin();
   else if (S.view === 'activar') html = vActivar();
   else {
-    const cuerpo = S.pid ? vPaciente() : (S.tab==='recetario' ? vRecetario() : S.tab==='cuenta' ? vCuenta() : vPacientes());
-    html = '<div class="app">'+topBar()+cuerpo+bottomNav()+'</div>';
+    const cuerpo = S.tab==='recetario' ? vRecetario() : S.tab==='cuenta' ? vCuenta() : (S.pid ? vPaciente() : vPacientes());
+    html = '<div class="app'+(S.side ? ' sideopen' : '')+'">'+topBar()+cuerpo+'</div>' + sideHtml();
     if (S.pdf && S.pid) { const pp = pacienteActual(); if (pp) html += vPdf(pp); }
   }
   const ae = document.activeElement, enRoot = ae && $('#root').contains(ae);
@@ -981,14 +1026,16 @@ async function cargarSemana(){
   const d = await refPac(S.pid).collection('weeks').doc(S.weekStart).get();
   S.levels = d.exists && Array.isArray(d.data().levels) ? d.data().levels : null;
   S.menu = d.exists && Array.isArray(d.data().menu) ? d.data().menu : null;
+  S.menuBase = d.exists && Array.isArray(d.data().menuBase) ? d.data().menuBase : null;
   S.notas = d.exists && typeof d.data().notes === 'string' ? d.data().notes : '';
 }
 async function abrirPaciente(id){
-  S.pid = id; S.ptab = 'resumen'; S.weights = []; S.levels = null; S.menu = null; S.weekStart = lunesISO(new Date()); setMsg(null);
+  S.pid = id; S.tab = 'pacientes'; S.ptab = 'menu'; S.compraOn = false; S.menuBase = null; S.weights = []; S.levels = null; S.menu = null; S.weekStart = lunesISO(new Date()); setMsg(null);
   render();
   const l0 = linkDe(id); if (l0 && l0.status === 'accepted') await leerWorkOut(id);
   try { await cargarPesos(); } catch(e){ setMsg('No se pudo leer el peso (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('pesos', e); }
   render();
+  if (S.pid === id) await cambiarSemana(0);
   const pa = pacienteActual(); if (pa && S.pid === id) preguntarHoras(pa);
 }
 async function guardarPaciente(id){
@@ -1006,8 +1053,15 @@ async function guardarPaciente(id){
     cerrarDlg(); await cargarPacientes(); render();
   } catch(e){ $('#d_msg').textContent = 'No se pudo guardar. Inténtalo de nuevo.'; }
 }
+function dlgPeso(){
+  const kg = kgDe();
+  abrirDlg('<h2>Anotar peso</h2><p class="sub" style="margin-bottom:12px">'+(kg ? 'Último: '+kgTxt(kg)+' kg ('+fechaCorta(S.weights[0].id)+')' : 'Todavía no hay ningún peso.')+'</p>' +
+    '<div class="field"><label class="f" for="kg2">Peso en kg</label><input id="kg2" inputmode="decimal" placeholder="por ejemplo 72,5"></div>' +
+    '<div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn" data-act="guardarPeso">Guardar</button></div>');
+}
 async function guardarPeso(){
-  const kg = parseFloat(String(($('#kg').value||'')).replace(',','.'));
+  const campo = $('#dlg.open #kg2') || $('#kg');
+  const kg = parseFloat(String((campo && campo.value || '')).replace(',','.'));
   if (!(kg >= 20 && kg <= 300)){ setMsg('Escribe un peso entre 20 y 300 kg.', false); render(); return; }
   try {
     await refPac(S.pid).collection('weights').doc(iso(new Date())).set({kg:Math.round(kg*10)/10, by:'nutricion', byUid:S.user.uid, at:firebase.firestore.FieldValue.serverTimestamp()});
@@ -1016,7 +1070,7 @@ async function guardarPeso(){
       try { await db.collection('users').doc(l.patientUid).collection('bodyLog').doc(iso(new Date())).set({kg:Math.round(kg*10)/10, by:'nutricion', byUid:S.user.uid, at:firebase.firestore.FieldValue.serverTimestamp()}); }
       catch(e){ console.error('bodyLog', e); }
     }
-    setMsg('Guardado.', true); await cargarPesos();
+    setMsg('Peso guardado.', true); cerrarDlg(); await cargarPesos();
   } catch(e){ setMsg('No se pudo guardar (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('peso', e); }
   render();
 }
@@ -1026,7 +1080,7 @@ async function ponerNivel(dia, nivel){
   catch(e){ setMsg('No se pudo guardar la semana. Inténtalo de nuevo.', false); render(); }
 }
 async function cambiarSemana(n){
-  S.weekStart = sumaDias(S.weekStart, n); S.levels = null; S.menu = null; setMsg(null); render();
+  S.weekStart = sumaDias(S.weekStart, n); S.levels = null; S.menu = null; S.menuBase = null; setMsg(null); render();
   try { await cargarSemana(); } catch(e){ setMsg('No se pudo leer la semana (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('semana', e); }
   render();
 }
@@ -1325,9 +1379,14 @@ document.addEventListener('click', e => {
     case 'olvido': olvido(); break;
     case 'activar': activar(); break;
     case 'salir': auth.signOut(); break;
-    case 'tab': S.tab = t.dataset.v; S.pid = null; setMsg(null); render(); break;
+    case 'tab': S.tab = t.dataset.v; if (S.tab === 'pacientes') { S.pid = null; } setMsg(null); if (window.innerWidth < 900) S.side = false; render(); break;
+    case 'side': S.side = !S.side; try { if (window.innerWidth >= 900) localStorage.setItem('nu_side', S.side ? '1' : '0'); } catch(e){} render(); break;
+    case 'sideDatos': S.tab = 'pacientes'; S.ptab = 'datos'; setMsg(null); if (window.innerWidth < 900) S.side = false; render(); break;
+    case 'pesoDlg': dlgPeso(); break;
+    case 'compraAbrir': S.compraOn = true; S.ptab = 'compra'; render(); window.scrollTo(0, 0); break;
+    case 'compraCerrar': S.compraOn = false; S.ptab = 'informe'; render(); break;
     case 'abrir': abrirPaciente(t.dataset.id); break;
-    case 'volver': S.pid = null; setMsg(null); render(); break;
+    case 'volver': S.pid = null; S.tab = 'pacientes'; setMsg(null); render(); break;
     case 'nuevo': dlgPaciente(null); break;
     case 'editar': dlgPaciente(pacienteActual()); break;
     case 'guardarPaciente': guardarPaciente(t.dataset.id); break;
@@ -1339,7 +1398,7 @@ document.addEventListener('click', e => {
     case 'pdfCerrar': S.pdf = false; render(); break;
     case 'pdfImprimir': window.print(); break;
     case 'chkCompra': toggleCompra(t.dataset.k); break;
-    case 'ptab': S.ptab = t.dataset.v; setMsg(null); render(); if (S.ptab==='semana' || S.ptab==='informe') cambiarSemana(0); break;
+    case 'ptab': S.ptab = t.dataset.v; setMsg(null); S.tab = 'pacientes'; render(); window.scrollTo(0, 0); break;
     case 'guardarPeso': guardarPeso(); break;
     case 'nivel': ponerNivel(parseInt(t.dataset.d,10), parseInt(t.dataset.l,10)); break;
     case 'semana': cambiarSemana(parseInt(t.dataset.n,10)); break;
