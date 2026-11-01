@@ -827,24 +827,25 @@ function vPdf(p){
   const ds = datosSemana(p), rs = resumenSemana(ds), kg = kgDe(), fin = sumaDias(S.weekStart, 6), hayR = ds.some(d => d.real);
   const edad = new Date().getFullYear() - p.birthYear;
   let h = '<div class="pdfdoc"><div class="pdfbar"><button class="btn secondary" data-act="pdfCerrar">‹ Cerrar</button><button class="btn" data-act="pdfImprimir">🖨️ Imprimir / Guardar PDF</button></div><div class="pdfpage">';
-  h += '<header class="wo2head"><img src="static/icon-192.png" alt="NutriForce" width="64" height="64"><div><div class="ttl">INFORME SEMANAL DE NUTRICIÓN</div>' +
+  const hd = '<header class="wo2head"><img src="static/icon-192.png" alt="NutriForce" width="64" height="64"><div><div class="ttl">INFORME SEMANAL DE NUTRICIÓN</div>' +
     '<div class="l2">Semana  ·  '+fechaCorta(S.weekStart)+' – '+fechaCorta(fin)+'</div>' +
     '<div class="l2">Paciente: '+esc(p.name)+'  ·  '+esc(p.sex || '')+' · '+edad+' años · '+p.heightCm+' cm · '+kgTxt(kg)+' kg'+(p.goal ? '  ·  Objetivo: '+esc(p.goal) : '')+'</div></div></header>';
+  h += '<div class="pgrp">'+hd;
   h += '<section><h2>Cómo cuadra el menú con la semana de entreno</h2>'+explicacionSemana(p, ds, rs)+'</section>';
   if (rs.nMenu) {
     h += '<section><h2>Resumen</h2><div class="kpis"><div><span>Objetivo medio</span><b>'+fmtN(rs.objMedio)+' kcal</b></div><div><span>Menú medio</span><b>'+fmtN(rs.menuMedio)+' kcal</b></div><div><span>Cubierto</span><b>'+Math.round(rs.cobertura*100)+' %</b></div><div><span>Balance semanal</span><b>'+(rs.balance >= 0 ? '+' : '−')+fmtN(Math.abs(rs.balance))+' kcal</b></div></div>' +
       '<h3>Lectura rápida</h3>'+lecturaRapida(ds, rs, kg, PAL_PDF)+'<div class="g2"><div><h3>Energía por día (kcal)</h3>'+chartKcal(ds, PAL_PDF)+leyendaKcal(PAL_PDF, hayR)+'</div>' +
       '<div><h3>Macros: necesarios y en el menú</h3>'+barrasMacros(ds, PAL_PDF, kg)+'</div></div>' +
-      '<div class="g2"><div><h3>Macros día a día</h3>'+chartMacrosDia(ds, PAL_PDF)+leyendaMacros(PAL_PDF)+'</div><div><h3>Cifras por día</h3>'+tablaCifras(ds, PAL_PDF)+'</div></div></section>';
+      '</section></div><div class="pgrp">'+hd+'<section><div class="g2"><div><h3>Macros día a día</h3>'+chartMacrosDia(ds, PAL_PDF)+leyendaMacros(PAL_PDF)+'</div><div><h3>Cifras por día</h3>'+tablaCifras(ds, PAL_PDF)+'</div></div></section>';
     h += '<section><h2>Pautas a seguir</h2><ul>'+pautasAuto(p, ds, rs).map(x => '<li>'+x+'</li>').join('')+'</ul>' +
     (S.notas && S.notas.trim() ? '<h3>Notas del nutricionista</h3><p style="white-space:pre-wrap">'+esc(S.notas.trim())+'</p>' : '')+'</section>';
 
     h += cambiosPdf();
-    h += '<section class="menupage"><h2>Menú de la semana</h2>'+tablaMenuPdf(p)+'</section>';
+    h += '</div><div class="pgrp menug">'+hd+'<section><h2>Menú de la semana</h2>'+tablaMenuPdf(p)+'</section>';
   } else h += '<section><p class="mut">Esta semana aún no tiene menú.</p></section>';
   if (!rs.nMenu) { h += '<section><h2>Pautas a seguir</h2><ul>'+pautasAuto(p, ds, rs).map(x => '<li>'+x+'</li>').join('')+'</ul>' +
     (S.notas && S.notas.trim() ? '<h3>Notas del nutricionista</h3><p style="white-space:pre-wrap">'+esc(S.notas.trim())+'</p>' : '')+'</section>'; }
-  h += '<footer'+(rs.nMenu ? ' style="page:menu"' : '')+'>Generado el '+fechaCorta(iso(new Date()))+' con NutriForce · RPT · Las cifras son estimaciones orientativas.</footer></div></div>';
+  h += '<footer'+(rs.nMenu ? ' style="page:menu"' : '')+'>Generado el '+fechaCorta(iso(new Date()))+' con NutriForce · RPT · Las cifras son estimaciones orientativas.</footer></div></div></div>';
   return h;
 }
 function tablaMenuApp(p){
