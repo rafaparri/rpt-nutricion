@@ -137,7 +137,7 @@ function vResumen(p){
     '<div class="btn-row"><input id="kg" inputmode="decimal" placeholder="kg, por ejemplo 72,5" style="flex:2"><button class="btn" style="flex:1" data-act="guardarPeso">Guardar</button></div>' +
     msgHtml() +
     (w.length > 1 ? '<div class="hist">'+w.slice(1).map(x => fechaCorta(x.id)+': '+kgTxt(x.kg)+' kg').join(' · ')+'</div>' : '') + '</div>' +
-    vWorkOutCard(p) +
+    vWorkOutCard(p) + vCompeticion(p) +
     '<div class="card"><h3>Datos</h3><p class="sub">'+esc([p.sex, p.birthYear ? 'nacido en '+p.birthYear : '', p.heightCm ? p.heightCm+' cm' : '', p.goal ? 'Objetivo: '+p.goal : ''].filter(Boolean).join(' · ') || 'Sin datos')+'</p>' +
     (p.notes ? '<p style="margin:8px 0 0">'+esc(p.notes)+'</p>' : '') + '</div>' +
     '<div class="btn-row"><button class="btn secondary" data-act="editar">Editar datos</button><button class="btn danger" data-act="borrar">Eliminar</button></div>';
@@ -192,10 +192,36 @@ function tipoObjetivo(p){
   const t = (p.goal || '').toLowerCase();
   return /baj|adelgaz|perd|defin/.test(t) ? 'bajar' : /sub|gan|volumen|masa/.test(t) ? 'subir' : 'mantener';
 }
+const claveComp = id => String(id).replace(/[^A-Za-z0-9_-]/g, '_');
+// Competiciones del paciente: las de WorkOut (fechas, con su permiso) + las puestas a mano.
+// Las horas de pesaje y de inicio siempre las escribe el nutricionista (p.compData).
+function compsDe(p){
+  const w = S.wo[p.id], datos = p.compData || {}, out = [], vistas = {};
+  (w ? w.comps : []).forEach(c => {
+    const date = c.day || c.startDate; if (!date) return;
+    const k = claveComp(c.id), d = datos[k] || {}; vistas[k] = true;
+    out.push({key:k, name:c.name || 'Competición', date, category:c.category || '', weighIn:d.weighIn || '', start:d.start || '', manual:false});
+  });
+  Object.keys(datos).forEach(k => { if (vistas[k] || !datos[k].manual) return;
+    out.push({key:k, name:datos[k].name || 'Competición', date:datos[k].date, category:'', weighIn:datos[k].weighIn || '', start:datos[k].start || '', manual:true}); });
+  return out.filter(c => c.date).sort((a,b) => a.date < b.date ? -1 : 1);
+}
+const compsProximas = p => compsDe(p).filter(c => c.date >= iso(new Date()));
 function diasCompeticion(pid){
-  const w = S.wo[pid], out = {};
-  (w ? w.comps : []).forEach(c => { const d = c.day || c.startDate; if (d) { out[d] = true; out[sumaDias(d, -1)] = true; } });
+  const p = S.patients.find(x => x.id === pid), out = {};
+  (p ? compsDe(p) : []).forEach(c => { out[c.date] = true; out[sumaDias(c.date, -1)] = true; });
   return out;
+}
+function vCompeticion(p){
+  const cs = compsProximas(p);
+  const filas = cs.map(c => {
+    const falta = !c.weighIn || !c.start;
+    return '<div class="row"><div class="grow"><b>'+esc(c.name)+'</b><p class="sub">'+fechaCorta(c.date)+(c.category ? ' · '+esc(c.category) : '')+(c.manual ? ' · a mano' : '')+'<br>' +
+      (falta ? '⏰ Faltan las horas' : 'Pesaje '+esc(c.weighIn)+' · Inicio '+esc(c.start))+'</p></div>' +
+      '<button class="btn '+(falta ? '' : 'secondary')+'" data-act="horasComp" data-k="'+esc(c.key)+'">'+(falta ? 'Poner horas' : 'Editar')+'</button></div>';
+  }).join('');
+  return '<div class="card"><h3>Competición</h3>' + (filas ? '<div class="list">'+filas+'</div>' : '<p class="sub" style="margin-bottom:10px">No hay competiciones próximas.</p>') +
+    '<button class="btn ghost" style="margin-top:10px" data-act="horasComp" data-k="">＋ Añadir competición a mano</button></div>';
 }
 function calcDia(p, nivel, fecha, kg, comp){
   const edad = new Date().getFullYear() - p.birthYear;
@@ -344,6 +370,7 @@ async function abrirPaciente(id){
   const l0 = linkDe(id); if (l0 && l0.status === 'accepted') await leerWorkOut(id);
   try { await cargarPesos(); } catch(e){ setMsg('No se pudo leer el peso (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('pesos', e); }
   render();
+  const pa = pacienteActual(); if (pa && S.pid === id) preguntarHoras(pa);
 }
 async function guardarPaciente(id){
   const g = x => ($('#'+x).value || '').trim();
@@ -400,6 +427,50 @@ async function borrarSeguro(){
     cerrarDlg(); S.pid = null; await cargarPacientes();
   } catch(e){ cerrarDlg(); setMsg('No se pudo eliminar.', false); }
   render();
+}
+
+/* ---------- horas de competición ---------- */
+function dlgComp(key, aviso){
+  const p = pacienteActual(); if (!p) return;
+  const c = key ? compsDe(p).find(x => x.key === key) : null;
+  const nueva = !key;
+  abrirDlg('<h2>'+(nueva ? 'Competición a mano' : esc(c.name))+'</h2>' +
+    (aviso ? '<div class="notice" style="margin-bottom:12px">🏆 Hay una competición próxima. ¿Ya tienes las horas?</div>' : '') +
+    (c ? '<p class="sub" style="margin-bottom:12px">'+fechaCorta(c.date)+(c.category ? ' · '+esc(c.category) : '')+'</p>' : '') +
+    (nueva ? '<div class="field"><label class="f" for="c_name">Nombre</label><input id="c_name" autocomplete="off"></div><div class="field"><label class="f" for="c_date">Fecha</label><input id="c_date" type="date"></div>' : '') +
+    '<div class="grid2"><div class="field"><label class="f" for="c_w">Hora del pesaje</label><input id="c_w" type="time" value="'+esc(c ? c.weighIn : '')+'"></div>' +
+    '<div class="field"><label class="f" for="c_s">Hora de inicio</label><input id="c_s" type="time" value="'+esc(c ? c.start : '')+'"></div></div>' +
+    '<div class="msg err" id="c_msg"></div>' +
+    '<div class="btn-row"><button class="btn secondary" data-act="cerrar">'+(aviso ? 'Más tarde' : 'Cancelar')+'</button><button class="btn" data-act="guardarComp" data-k="'+esc(key||'')+'">Guardar</button></div>' +
+    (c && c.manual ? '<button class="btn danger" style="margin-top:10px" data-act="quitarComp" data-k="'+esc(key)+'">Quitar competición</button>' : ''));
+}
+async function guardarComp(key){
+  const p = pacienteActual(); if (!p) return;
+  const datos = Object.assign({}, p.compData || {});
+  const w = $('#c_w').value || '', st = $('#c_s').value || '';
+  if (!key) {
+    const name = ($('#c_name').value || '').trim(), date = $('#c_date').value;
+    if (!name || !date) { $('#c_msg').textContent = 'Escribe el nombre y la fecha.'; return; }
+    key = 'm'+Date.now();
+    datos[key] = {manual:true, name, date, weighIn:w, start:st};
+  } else datos[key] = Object.assign({}, datos[key] || {}, {weighIn:w, start:st});
+  try { await refPac(p.id).update({compData:datos}); p.compData = datos; cerrarDlg(); }
+  catch(e){ $('#c_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
+  render();
+}
+async function quitarComp(key){
+  const p = pacienteActual(); if (!p) return;
+  const datos = Object.assign({}, p.compData || {}); delete datos[key];
+  try { await refPac(p.id).update({compData:datos}); p.compData = datos; cerrarDlg(); } catch(e){ $('#c_msg').textContent = 'No se pudo quitar.'; return; }
+  render();
+}
+// Al abrir un paciente: si tiene una competición en los próximos 45 días sin horas, pregunta una vez.
+function preguntarHoras(p){
+  S.preguntadas = S.preguntadas || {};
+  const limite = sumaDias(iso(new Date()), 45);
+  const c = compsProximas(p).find(x => x.date <= limite && (!x.weighIn || !x.start) && !S.preguntadas[p.id+'|'+x.key]);
+  if (!c) return;
+  S.preguntadas[p.id+'|'+c.key] = true; dlgComp(c.key, true);
 }
 
 /* ---------- acciones de vínculo ---------- */
@@ -526,6 +597,9 @@ document.addEventListener('click', e => {
     case 'semana': cambiarSemana(parseInt(t.dataset.n,10)); break;
     case 'recargar': recargar(); break;
     case 'vincular': dlgVinculo(); break;
+    case 'horasComp': dlgComp(t.dataset.k || ''); break;
+    case 'guardarComp': guardarComp(t.dataset.k || ''); break;
+    case 'quitarComp': quitarComp(t.dataset.k); break;
     case 'guardarVinculo': guardarVinculo(); break;
     case 'quitarVinculo': quitarVinculo(t.dataset.id); break;
     case 'aceptar': aceptar(t.dataset.id); break;
