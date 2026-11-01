@@ -32,6 +32,7 @@ const S = {
   patients:[], pid:null, ptab:'resumen',
   weights:[], weekStart:lunesISO(new Date()), levels:null,
   links:[], requests:[], wo:{}, woPlanId:null, woMsg:null,
+  recipes:[], sharedRecipes:[], rtab:'mias', rq:'', cola:[], rmsg:null,
   msg:null, msgOk:false, busy:false
 };
 const refPac = pid => db.collection('nu_patients').doc(pid);
@@ -271,8 +272,24 @@ function vSemana(p){
     '<button class="btn secondary" data-act="semana" data-n="7" aria-label="Semana siguiente">›</button></div>' +
     '<div class="card"><h3 style="margin-bottom:0">Intensidad de entreno</h3><p class="sub">Elige un nivel para cada día. Se guarda al tocar.</p>'+filas+'</div>'+vMacros(p)+msgHtml();
 }
+function norm(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+const macrosTxt = r => (r.kcal||0)+' kcal · P '+kgTxt(r.prot||0)+' · C '+kgTxt(r.carb||0)+' · G '+kgTxt(r.fat||0);
 function vRecetario(){
-  return '<div class="crumbs"><b>Recetario</b></div><div class="content"><h1>Recetario</h1><div class="card"><p class="sub">Aquí estará el recetario compartido. Es la siguiente fase.</p></div></div>';
+  const lista = S.rtab === 'compartidas' ? S.sharedRecipes : S.recipes;
+  const q = norm(S.rq);
+  const f = lista.filter(r => !q || norm([r.name, r.category, r.useIn, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0);
+  const filas = f.length ? '<div class="list">' + f.map(r =>
+    '<button class="row" data-act="verReceta" data-id="'+esc(r.id)+'"><div class="avatar">🍽</div><div class="grow"><b>'+esc(r.name)+'</b>' +
+    '<p class="sub">'+esc(macrosTxt(r))+' por ración</p>' +
+    '<p class="sub">'+esc([r.category, r.useIn].filter(Boolean).join(' · '))+(S.rtab==='mias' && r.shared ? ' · 🔗 compartida' : '')+(S.rtab==='compartidas' ? ' · de '+esc(r.ownerName||'otro nutricionista') : '')+'</p></div><span class="chev">›</span></button>').join('') + '</div>'
+    : '<div class="empty">'+(lista.length ? 'Ninguna receta coincide con la búsqueda.' : (S.rtab==='compartidas' ? 'Todavía nadie ha compartido recetas.' : 'Todavía no tienes recetas.<br>Crea una o importa fichas de Word.'))+'</div>';
+  return '<div class="crumbs"><b>Recetario</b></div><div class="content"><h1>Recetario</h1>' +
+    '<div class="tabs" role="tablist"><button role="tab" data-act="rtab" data-v="mias" aria-selected="'+(S.rtab==='mias')+'">Mis recetas ('+S.recipes.length+')</button>' +
+    '<button role="tab" data-act="rtab" data-v="compartidas" aria-selected="'+(S.rtab==='compartidas')+'">Compartidas ('+S.sharedRecipes.length+')</button></div>' +
+    '<div class="field" style="margin-top:14px"><label class="f" for="rq">Buscar</label><input id="rq" type="search" value="'+esc(S.rq)+'" placeholder="Nombre, ingrediente, categoría…" autocomplete="off"></div>' +
+    (S.rmsg ? '<div class="msg '+(S.rmsgOk?'ok':'err')+'">'+esc(S.rmsg)+'</div>' : '') + filas +
+    '<div class="btn-row"><button class="btn" data-act="nuevaReceta">＋ Nueva receta</button><button class="btn secondary" data-act="importarWord">📄 Importar de Word</button></div>' +
+    '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
 }
 function vCuenta(){
   return '<div class="crumbs"><b>Cuenta</b></div><div class="content"><h1>Cuenta</h1>' +
@@ -292,10 +309,15 @@ function render(){
     const cuerpo = S.pid ? vPaciente() : (S.tab==='recetario' ? vRecetario() : S.tab==='cuenta' ? vCuenta() : vPacientes());
     html = '<div class="app">'+topBar()+cuerpo+bottomNav()+'</div>';
   }
-  const antes = document.activeElement && document.activeElement.id;
-  const val = antes && document.activeElement.value;
+  const ae = document.activeElement, enRoot = ae && $('#root').contains(ae);
+  const antes = enRoot && ae.id, val = antes && ae.value;
+  const ini = antes && ae.selectionStart, fin = antes && ae.selectionEnd;
   $('#root').innerHTML = html;
-  if (antes && $('#'+antes) && val != null) { $('#'+antes).value = val; }
+  const nuevo = antes && $('#'+antes);
+  if (nuevo && val != null) {
+    nuevo.value = val; nuevo.focus();
+    try { if (ini != null) nuevo.setSelectionRange(ini, fin); } catch(e){}
+  }
 }
 function setMsg(t, ok){ S.msg = t; S.msgOk = !!ok; }
 
@@ -430,6 +452,117 @@ async function borrarSeguro(){
   render();
 }
 
+/* ---------- recetas ---------- */
+const porNombre = (a,b) => String(a.name||'').localeCompare(String(b.name||''),'es');
+async function cargarRecetas(){
+  const m = await db.collection('nu_recipes').where('ownerUid','==',S.user.uid).get();
+  S.recipes = m.docs.map(d => Object.assign({id:d.id}, d.data())).sort(porNombre);
+  try {
+    const c = await db.collection('nu_recipes').where('shared','==',true).get();
+    S.sharedRecipes = c.docs.map(d => Object.assign({id:d.id}, d.data())).filter(r => r.ownerUid !== S.user.uid).sort(porNombre);
+  } catch(e){ S.sharedRecipes = []; console.error('compartidas', e); }
+}
+function setRmsg(t, ok){ S.rmsg = t; S.rmsgOk = !!ok; }
+const recetaPorId = id => S.recipes.concat(S.sharedRecipes).find(r => r.id === id);
+function dlgVerReceta(id){
+  const r = recetaPorId(id); if (!r) return;
+  const mia = r.ownerUid === S.user.uid;
+  abrirDlg('<h2>'+esc(r.name)+'</h2>' +
+    '<p class="sub" style="margin-bottom:6px">'+esc(macrosTxt(r))+' por ración</p>' +
+    '<p class="sub" style="margin-bottom:12px">'+(r.servings ? r.servings+' raciones · ' : '')+(r.weight ? 'ración de '+r.weight+' g · ' : '')+esc([r.category, r.useIn].filter(Boolean).join(' · '))+(mia ? '' : ' · de '+esc(r.ownerName||'otro nutricionista'))+'</p>' +
+    '<h3>Ingredientes</h3><ul style="margin:6px 0 14px 20px;font-size:17px;line-height:1.5">'+(r.ingredients||[]).map(i => '<li>'+esc(i)+'</li>').join('')+'</ul>' +
+    (r.prep ? '<h3>Preparación</h3><p style="white-space:pre-wrap;font-size:17px;line-height:1.5;margin:6px 0 14px">'+esc(r.prep)+'</p>' : '') +
+    '<div class="msg err" id="r_msg"></div>' +
+    (mia
+      ? '<button class="btn secondary" data-act="editarReceta" data-id="'+esc(r.id)+'">Editar</button>' +
+        '<button class="btn secondary" style="margin-top:10px" data-act="compartirReceta" data-id="'+esc(r.id)+'">'+(r.shared ? '🔒 Dejar de compartir' : '🔗 Compartir con otros nutricionistas')+'</button>' +
+        '<button class="btn danger" style="margin-top:10px" data-act="borrarReceta" data-id="'+esc(r.id)+'">Eliminar</button>'
+      : '<button class="btn" data-act="copiarReceta" data-id="'+esc(r.id)+'">Copiar a mis recetas</button>') +
+    '<button class="btn ghost" style="margin-top:10px" data-act="cerrar">Cerrar</button>');
+}
+function dlgFormReceta(r, pendientes){
+  r = r || {};
+  const falta = pendientes > 0 ? '<div class="notice" style="margin-bottom:12px">📄 Receta leída del Word. Revísala. Quedan '+pendientes+' más después de esta.</div>' : '';
+  const no = (r.unrecognized && r.unrecognized.length) ? '<div class="notice" style="margin-bottom:12px">No se han reconocido para el cálculo: '+esc(r.unrecognized.join(', '))+'. Corrige los macros a mano si hace falta.</div>' : '';
+  const decl = r.declarado ? '<div class="notice ok" style="margin-bottom:12px">Los macros vienen declarados en el propio documento.</div>' : '';
+  abrirDlg('<h2>'+(r.id ? 'Editar receta' : 'Receta')+'</h2>' + falta + decl + no +
+    '<div class="field"><label class="f" for="r_name">Nombre</label><input id="r_name" value="'+esc(r.name||'')+'" autocomplete="off"></div>' +
+    '<div class="grid2"><div class="field"><label class="f" for="r_serv">Raciones</label><input id="r_serv" inputmode="numeric" value="'+esc(r.servings||4)+'"></div>' +
+    '<div class="field"><label class="f" for="r_use">Utilizar en</label><input id="r_use" value="'+esc(r.useIn||'Almuerzo, Cena')+'"></div></div>' +
+    '<div class="field"><label class="f" for="r_ing">Ingredientes (uno por línea)</label><textarea id="r_ing" rows="8" style="padding:12px 14px;line-height:1.4">'+esc((r.ingredients||[]).join('\n'))+'</textarea></div>' +
+    '<div class="field"><label class="f" for="r_prep">Preparación</label><textarea id="r_prep" rows="6" style="padding:12px 14px;line-height:1.4">'+esc(r.prep||'')+'</textarea></div>' +
+    '<button class="btn secondary" data-act="calcReceta" style="margin-bottom:6px">🧮 Calcular macros desde los ingredientes</button>' +
+    '<p class="sub" style="margin-bottom:10px">Por ración. Puedes corregirlos a mano.</p>' +
+    '<div class="grid2"><div class="field"><label class="f" for="r_kcal">Kcal</label><input id="r_kcal" inputmode="decimal" value="'+esc(r.kcal||0)+'"></div>' +
+    '<div class="field"><label class="f" for="r_w">Peso ración (g)</label><input id="r_w" inputmode="decimal" value="'+esc(r.weight||0)+'"></div></div>' +
+    '<div class="grid2"><div class="field"><label class="f" for="r_p">Proteína (g)</label><input id="r_p" inputmode="decimal" value="'+esc(kgTxt(r.prot||0))+'"></div>' +
+    '<div class="field"><label class="f" for="r_c">Carbohidratos (g)</label><input id="r_c" inputmode="decimal" value="'+esc(kgTxt(r.carb||0))+'"></div></div>' +
+    '<div class="field"><label class="f" for="r_g">Grasa (g)</label><input id="r_g" inputmode="decimal" value="'+esc(kgTxt(r.fat||0))+'"></div>' +
+    '<label style="display:flex;gap:10px;align-items:center;margin:6px 0 12px;font-size:17px"><input id="r_sh" type="checkbox" style="width:24px;min-height:24px"'+(r.shared ? ' checked' : '')+'> Compartir con otros nutricionistas</label>' +
+    '<div class="msg err" id="r_msg"></div>' +
+    '<div class="btn-row"><button class="btn secondary" data-act="cerrarReceta">'+(pendientes > 0 ? 'Saltar esta' : 'Cancelar')+'</button><button class="btn" data-act="guardarReceta" data-id="'+esc(r.id||'')+'">'+(pendientes > 0 ? 'Guardar y siguiente' : 'Guardar')+'</button></div>');
+  S.formReceta = r;
+}
+function leerNum(id){ const n = parseFloat(String($('#'+id).value).replace(',', '.')); return isFinite(n) ? n : 0; }
+function calcReceta(){
+  const lineas = $('#r_ing').value.split('\n').map(x => x.trim()).filter(Boolean);
+  const serv = Math.max(parseInt($('#r_serv').value, 10) || 4, 1);
+  const e = RPT_RECETAS.estimarMacros(lineas, serv);
+  $('#r_kcal').value = e.kcal; $('#r_p').value = kgTxt(e.prot); $('#r_c').value = kgTxt(e.carb); $('#r_g').value = kgTxt(e.grasa); $('#r_w').value = e.peso;
+  $('#r_msg').className = 'msg ' + (e.noReconocidos.length ? 'err' : 'ok');
+  $('#r_msg').textContent = e.noReconocidos.length ? 'Calculado. No se han reconocido: '+e.noReconocidos.join(', ')+'.' : 'Calculado.';
+}
+async function guardarReceta(id){
+  const name = ($('#r_name').value || '').trim();
+  const ing = $('#r_ing').value.split('\n').map(x => x.trim()).filter(Boolean);
+  if (!name) { $('#r_msg').textContent = 'Escribe el nombre.'; return; }
+  if (!ing.length) { $('#r_msg').textContent = 'Escribe al menos un ingrediente.'; return; }
+  const kcal = Math.round(leerNum('r_kcal')), prot = leerNum('r_p'), carb = leerNum('r_c'), fat = leerNum('r_g');
+  const datos = { name, servings:Math.max(parseInt($('#r_serv').value, 10) || 1, 1), useIn:($('#r_use').value || '').trim(), ingredients:ing,
+    prep:($('#r_prep').value || '').trim(), kcal, prot, carb, fat, weight:Math.round(leerNum('r_w')),
+    category:RPT_RECETAS.categorizar(kcal, prot, carb, fat), shared:$('#r_sh').checked, updatedMs:Date.now() };
+  try {
+    if (id) await db.collection('nu_recipes').doc(id).update(datos);
+    else await db.collection('nu_recipes').add(Object.assign({ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now()}, datos));
+    await cargarRecetas();
+  } catch(e){ $('#r_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
+  siguienteDeCola();
+}
+function siguienteDeCola(){
+  if (S.cola.length) { const r = S.cola.shift(); dlgFormReceta(r, S.cola.length); }
+  else { cerrarDlg(); setRmsg('Receta guardada.', true); render(); }
+}
+async function importarDocx(files){
+  const ok = [], mal = [];
+  for (const f of Array.from(files)) {
+    try { ok.push(await RPT_RECETAS.leerDocx(await f.arrayBuffer())); }
+    catch(e){ mal.push(f.name+' ('+((e && e.message) || 'error')+')'); }
+  }
+  setRmsg(mal.length ? 'No se pudieron leer: '+mal.join('; ') : null, false);
+  if (!ok.length) { render(); return; }
+  S.cola = ok; siguienteDeCola(); render();
+}
+async function compartirReceta(id){
+  const r = recetaPorId(id); if (!r) return;
+  try { await db.collection('nu_recipes').doc(id).update({shared:!r.shared}); await cargarRecetas(); }
+  catch(e){ $('#r_msg').textContent = 'No se pudo cambiar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
+  dlgVerReceta(id); render();
+}
+async function copiarReceta(id){
+  const r = recetaPorId(id); if (!r) return;
+  const c = Object.assign({}, r); delete c.id;
+  Object.assign(c, {ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], shared:false, copiedFrom:r.ownerUid, createdMs:Date.now(), updatedMs:Date.now()});
+  try { await db.collection('nu_recipes').add(c); await cargarRecetas(); }
+  catch(e){ $('#r_msg').textContent = 'No se pudo copiar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
+  cerrarDlg(); S.rtab = 'mias'; setRmsg('Copiada a tus recetas.', true); render();
+}
+async function borrarReceta(id, btn){
+  if (!btn.dataset.seguro) { btn.dataset.seguro = '1'; btn.textContent = '¿Seguro? Pulsa otra vez para eliminar'; return; }
+  try { await db.collection('nu_recipes').doc(id).delete(); await cargarRecetas(); }
+  catch(e){ $('#r_msg').textContent = 'No se pudo eliminar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
+  cerrarDlg(); setRmsg('Receta eliminada.', true); render();
+}
+
 /* ---------- horas de competición ---------- */
 function dlgComp(key, aviso){
   const p = pacienteActual(); if (!p) return;
@@ -562,7 +695,7 @@ async function olvido(){
 async function activar(){
   try {
     await db.collection('users').doc(S.user.uid).collection('roleGrants').doc('nutritionist').set({createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-    S.isNutri = true; await cargarPacientes(); S.links = []; S.view = 'app'; S.tab = 'pacientes'; setMsg(null);
+    S.isNutri = true; try { await cargarRecetas(); } catch(e){} await cargarPacientes(); S.links = []; S.view = 'app'; S.tab = 'pacientes'; setMsg(null);
   } catch(e){ setMsg('No se pudo activar. Puede faltar publicar las reglas nuevas en Firebase.', false); }
   render();
 }
@@ -598,6 +731,17 @@ document.addEventListener('click', e => {
     case 'semana': cambiarSemana(parseInt(t.dataset.n,10)); break;
     case 'recargar': recargar(); break;
     case 'vincular': dlgVinculo(); break;
+    case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
+    case 'verReceta': dlgVerReceta(t.dataset.id); break;
+    case 'nuevaReceta': S.cola = []; dlgFormReceta(null, 0); break;
+    case 'importarWord': { const i = $('#docxIn'); if (i) i.click(); break; }
+    case 'editarReceta': S.cola = []; dlgFormReceta(recetaPorId(t.dataset.id), 0); break;
+    case 'calcReceta': calcReceta(); break;
+    case 'guardarReceta': guardarReceta(t.dataset.id); break;
+    case 'cerrarReceta': if (S.cola.length) siguienteDeCola(); else cerrarDlg(); break;
+    case 'compartirReceta': compartirReceta(t.dataset.id); break;
+    case 'copiarReceta': copiarReceta(t.dataset.id); break;
+    case 'borrarReceta': borrarReceta(t.dataset.id, t); break;
     case 'horasComp': dlgComp(t.dataset.k || ''); break;
     case 'guardarComp': guardarComp(t.dataset.k || ''); break;
     case 'quitarComp': quitarComp(t.dataset.k); break;
@@ -610,7 +754,9 @@ document.addEventListener('click', e => {
     case 'proponer': proponer(); break;
   }
 });
-document.addEventListener('change', e => { if (e.target && e.target.id === 'woplan') S.woPlanId = e.target.value; });
+document.addEventListener('input', e => { if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
+document.addEventListener('change', e => {
+  if (e.target && e.target.id === 'docxIn' && e.target.files.length) { importarDocx(e.target.files); e.target.value = ''; return; } if (e.target && e.target.id === 'woplan') S.woPlanId = e.target.value; });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && S.view === 'login' && e.target.id === 'pw') entrar(false); });
 
 /* ---------- aviso de versión nueva ---------- */
@@ -640,7 +786,7 @@ auth.onAuthStateChanged(async u => {
     const g = await ur.collection('roleGrants').doc('nutritionist').get();
     S.isNutri = g.exists;
     try { await cargarSolicitudes(); } catch(e){ S.requests = []; }
-    if (S.isNutri) { await cargarPacientes(); try { await cargarLinks(); } catch(e){ S.links = []; } S.view = 'app'; S.tab = 'pacientes'; }
+    if (S.isNutri) { try { await cargarRecetas(); } catch(e){ S.recipes = []; console.error('recetas', e); } await cargarPacientes(); try { await cargarLinks(); } catch(e){ S.links = []; } S.view = 'app'; S.tab = 'pacientes'; }
     else S.view = 'activar';
   } catch(e){ S.view = 'activar'; setMsg('No se pudieron leer tus datos. Comprueba la conexión.', false); }
   render();
