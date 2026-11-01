@@ -552,8 +552,8 @@ function cabSemana(){
 }
 
 /* ---------- datos y gráficos de la semana ---------- */
-const PAL_APP = {txt:'#e8eef4', muted:'#b2bfcc', line:'#263242', track:'#263242', obj:'#5fe0d5', menu:'#34d1c4', real:'#ff8a65', gasto:'#b2bfcc', P:'#4f8cff', C:'#f2b84b', G:'#b07cf2'};
-const PAL_PDF = {txt:'#1b2430', muted:'#5b6b7e', line:'#d5dce4', track:'#e6ebf0', obj:'#0f8f85', menu:'#12a89c', real:'#e0623f', gasto:'#5b6b7e', P:'#2f6fe0', C:'#d99a1c', G:'#8a52d6'};
+const PAL_APP = {txt:'#e8eef4', muted:'#b2bfcc', line:'#263242', track:'#263242', obj:'#5fe0d5', menu:'#34d1c4', real:'#ff8a65', gasto:'#b2bfcc', ok:'#3fb26f', warn:'#f2b84b', bad:'#ef5f4a', fondo:'#3a4a5e', P:'#4f8cff', C:'#f2b84b', G:'#b07cf2'};
+const PAL_PDF = {txt:'#1b2430', muted:'#5b6b7e', line:'#d5dce4', track:'#e6ebf0', obj:'#0f8f85', menu:'#12a89c', real:'#e0623f', gasto:'#5b6b7e', ok:'#1f9d55', warn:'#d99a1c', bad:'#d6452f', fondo:'#cfd8e1', P:'#2f6fe0', C:'#d99a1c', G:'#8a52d6'};
 const LVL_COL = ['#6fa8dc','#3fb26f','#f2b84b','#e0614f'];
 const fmtN = n => Math.round(n).toLocaleString('es-ES');
 function datosSemana(p){
@@ -584,24 +584,38 @@ function resumenSemana(ds){
     gastoMedio: conMenu.length ? sum(conMenu, d => d.gasto)/conMenu.length : 0
   };
 }
+const estado = (pct, pal) => pct >= 0.95 && pct <= 1.05 ? pal.ok : (pct >= 0.9 && pct <= 1.1 ? pal.warn : pal.bad);
+const ABR_NIV = ['Desc.','Baja','Media','Alta'];
 function chartKcal(ds, pal){
-  const W = 340, H = 240, ml = 44, mr = 6, mt = 12, mb = 44;
+  const W = 360, H = 330, ml = 40, mr = 4, mt = 22, mb = 74;
   const real = ds.some(d => d.real);
   const vals = []; ds.forEach(d => { vals.push(d.gasto, d.obj ? d.obj.kcal : 0, d.menu ? d.menu.kcal : 0, d.real ? d.real.kcal : 0); });
-  const max = Math.max(500, Math.ceil(Math.max.apply(null, vals)/500)*500);
-  const gw = (W-ml-mr)/7, nb = real ? 3 : 2, bw = Math.min(14, (gw-6)/nb), y = v => mt + (H-mt-mb) * (1 - v/max);
-  let g = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Energía por día: gasto estimado, objetivo y menú" style="display:block;font-family:Archivo,system-ui,sans-serif">';
-  for (let v = 0; v <= max; v += 500) g += '<line x1="'+ml+'" x2="'+(W-mr)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="'+pal.line+'"/><text x="'+(ml-6)+'" y="'+(y(v)+4)+'" font-size="12" text-anchor="end" fill="'+pal.muted+'">'+v+'</text>';
+  const max = Math.max(500, Math.ceil(Math.max.apply(null, vals)/500)*500 + 250);
+  const gw = (W-ml-mr)/7, y = v => mt + (H-mt-mb) * (1 - v/max);
+  let g = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Energía por día: objetivo, menú y gasto estimado" style="display:block;font-family:Archivo,system-ui,sans-serif">';
+  for (let v = 0; v <= max; v += 500) g += '<line x1="'+ml+'" x2="'+(W-mr)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="'+pal.line+'"/><text x="'+(ml-5)+'" y="'+(y(v)+4)+'" font-size="11" text-anchor="end" fill="'+pal.muted+'">'+v+'</text>';
+  const pts = [];
   ds.forEach((d, k) => {
-    const x0 = ml + k*gw + (gw - nb*bw - (nb-1)*2)/2;
-    if (d.obj) g += '<rect x="'+x0+'" y="'+y(d.obj.kcal)+'" width="'+bw+'" height="'+(y(0)-y(d.obj.kcal))+'" fill="none" stroke="'+pal.obj+'" stroke-width="2" rx="2"/>';
-    if (d.menu) g += '<rect x="'+(x0+bw+2)+'" y="'+y(d.menu.kcal)+'" width="'+bw+'" height="'+(y(0)-y(d.menu.kcal))+'" fill="'+pal.menu+'" rx="2"/>';
-    if (real && d.real) g += '<rect x="'+(x0+2*(bw+2))+'" y="'+y(d.real.kcal)+'" width="'+bw+'" height="'+(y(0)-y(d.real.kcal))+'" fill="'+pal.real+'" rx="2"/>';
-    if (d.gasto) g += '<line x1="'+(ml+k*gw+2)+'" x2="'+(ml+(k+1)*gw-2)+'" y1="'+y(d.gasto)+'" y2="'+y(d.gasto)+'" stroke="'+pal.gasto+'" stroke-width="2.5" stroke-dasharray="4 3"/>';
-    g += '<text x="'+(ml+k*gw+gw/2)+'" y="'+(H-22)+'" font-size="13" font-weight="700" text-anchor="middle" fill="'+pal.txt+'">'+d.lbl.charAt(0)+'</text>';
-    if (d.nivel) g += '<rect x="'+(ml+k*gw+gw/2-7)+'" y="'+(H-14)+'" width="14" height="6" rx="3" fill="'+LVL_COL[d.nivel-1]+'"/>';
+    const cx = ml + k*gw + gw/2, bw = gw*0.62;
+    if (d.nivel) g += '<rect x="'+(ml+k*gw+1)+'" y="'+mt+'" width="'+(gw-2)+'" height="'+(H-mt-mb)+'" fill="'+LVL_COL[d.nivel-1]+'" opacity="0.10" rx="4"/>';
+    if (d.obj) g += '<rect x="'+(cx-bw/2)+'" y="'+y(d.obj.kcal)+'" width="'+bw+'" height="'+(y(0)-y(d.obj.kcal))+'" fill="'+pal.fondo+'" opacity="0.55" rx="3"/>';
+    if (d.menu) {
+      const fin = d.real || d.menu, pct = d.obj ? fin.kcal/d.obj.kcal : 1, w2 = bw*0.62;
+      g += '<rect x="'+(cx-w2/2)+'" y="'+y(d.menu.kcal)+'" width="'+w2+'" height="'+(y(0)-y(d.menu.kcal))+'" fill="'+estado(pct, pal)+'" rx="3"/>';
+      g += '<text x="'+cx+'" y="'+(Math.min(y(d.menu.kcal), d.obj ? y(d.obj.kcal) : 999)-5)+'" font-size="11" font-weight="800" text-anchor="middle" fill="'+pal.txt+'">'+d.menu.kcal.toFixed(0)+'</text>';
+      if (d.real) g += '<path d="M'+(cx-9)+' '+y(d.real.kcal)+' l9 -8 l9 8 l-9 8 z" fill="'+pal.real+'" stroke="'+pal.txt+'" stroke-width="1"/>';
+    }
+    if (d.gasto) pts.push([cx, y(d.gasto)]);
+    g += '<text x="'+cx+'" y="'+(H-mb+16)+'" font-size="14" font-weight="800" text-anchor="middle" fill="'+pal.txt+'">'+d.lbl.slice(0,3)+'</text>';
+    if (d.nivel) g += '<rect x="'+(cx-17)+'" y="'+(H-mb+22)+'" width="34" height="15" rx="7.5" fill="'+LVL_COL[d.nivel-1]+'"/><text x="'+cx+'" y="'+(H-mb+33)+'" font-size="10" font-weight="800" text-anchor="middle" fill="#10161d">'+ABR_NIV[d.nivel-1]+'</text>';
+    if (d.menu && d.obj) { const pct = Math.round((d.real || d.menu).kcal/d.obj.kcal*100); g += '<text x="'+cx+'" y="'+(H-mb+55)+'" font-size="13" font-weight="800" text-anchor="middle" fill="'+estado(pct/100, pal)+'">'+pct+'%</text>'; }
   });
-  return g + '</svg>';
+  if (pts.length > 1) g += '<polyline fill="none" stroke="'+pal.gasto+'" stroke-width="2.5" stroke-dasharray="5 4" points="'+pts.map(p => p.join(',')).join(' ')+'"/>';
+  pts.forEach(p => g += '<circle cx="'+p[0]+'" cy="'+p[1]+'" r="4" fill="'+pal.gasto+'" stroke="'+pal.txt+'" stroke-width="1"/>');
+  return g + '<text x="'+ml+'" y="'+(H-2)+'" font-size="10" fill="'+pal.muted+'">% = lo que cubre el menú del objetivo del día</text></svg>';
+}
+function leyendaKcal(pal, real){
+  return leyenda([['Objetivo del día', pal.fondo], ['Menú: ✓ 95–105 %', pal.ok], ['±10 %', pal.warn], ['Fuera', pal.bad], ['Gasto estimado', pal.gasto, 'linea']].concat(real ? [['◆ Lo realmente comido', pal.real]] : []), pal);
 }
 function leyenda(items, pal){
   return '<div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin:6px 0 2px;font-size:14px;color:'+pal.muted+'">' + items.map(([t, c, tipo]) =>
@@ -621,24 +635,41 @@ function barrasMacros(ds, pal, kg){
   return filas + '<p style="font-size:14px;color:'+pal.muted+';margin:0">La raya vertical marca el 100% del objetivo. Medias de los días con menú.</p>';
 }
 function chartMacrosDia(ds, pal){
-  const W = 340, H = 240, ml = 44, mr = 6, mt = 12, mb = 44;
-  const tot = m => m.prot*4 + m.carb*4 + m.fat*9;
-  const vals = []; ds.forEach(d => { if (d.obj) vals.push(tot(d.obj)); if (d.menu) vals.push(tot(d.menu)); });
-  const max = Math.max(500, Math.ceil(Math.max.apply(null, vals.concat([0]))/500)*500);
-  const gw = (W-ml-mr)/7, bw = Math.min(15, (gw-5)/2), y = v => mt + (H-mt-mb) * (1 - v/max);
-  let g = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Macros por día: objetivo y menú" style="display:block;font-family:Archivo,system-ui,sans-serif">';
-  for (let v = 0; v <= max; v += 500) g += '<line x1="'+ml+'" x2="'+(W-mr)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="'+pal.line+'"/><text x="'+(ml-6)+'" y="'+(y(v)+4)+'" font-size="12" text-anchor="end" fill="'+pal.muted+'">'+v+'</text>';
-  const pila = (m, x, hueco) => { let base = 0, out = '';
-    [['prot',4,'P'],['carb',4,'C'],['fat',9,'G']].forEach(([k, f, col]) => { const h = m[k]*f; out += '<rect x="'+x+'" y="'+y(base+h)+'" width="'+bw+'" height="'+Math.max(y(base)-y(base+h), 0)+'" fill="'+pal[col]+'" opacity="'+(hueco ? 0.38 : 1)+'"/>'; base += h; });
-    return out; };
-  ds.forEach((d, k) => {
-    const x0 = ml + k*gw + (gw - 2*bw - 2)/2;
-    if (d.obj) g += pila(d.obj, x0, true);
-    if (d.menu) g += pila(d.real || d.menu, x0 + bw + 2, false);
-    g += '<text x="'+(ml+k*gw+gw/2)+'" y="'+(H-22)+'" font-size="13" font-weight="700" text-anchor="middle" fill="'+pal.txt+'">'+d.lbl.charAt(0)+'</text>';
-    if (d.nivel) g += '<rect x="'+(ml+k*gw+gw/2-7)+'" y="'+(H-14)+'" width="14" height="6" rx="3" fill="'+LVL_COL[d.nivel-1]+'"/>';
+  const W = 360, ml = 80, mr = 4, mt = 4, rh = 54, gw = (W-ml-mr)/7, H = mt + rh*3 + 34;
+  let g = '<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Cobertura de proteína, carbohidratos y grasa por día" style="display:block;font-family:Archivo,system-ui,sans-serif">';
+  [['Proteína','prot','P'],['Hidratos','carb','C'],['Grasa','fat','G']].forEach(([n, k, col], r) => {
+    const y0 = mt + r*rh;
+    g += '<text x="'+(ml-8)+'" y="'+(y0+rh/2+4)+'" font-size="13" font-weight="800" text-anchor="end" fill="'+pal[col]+'">'+n+'</text>';
+    ds.forEach((d, i) => {
+      const x = ml + i*gw;
+      if (!(d.obj && d.menu)) { g += '<rect x="'+(x+2)+'" y="'+(y0+2)+'" width="'+(gw-4)+'" height="'+(rh-4)+'" rx="6" fill="none" stroke="'+pal.line+'"/>'; return; }
+      const v = (d.real || d.menu)[k], o = d.obj[k], pct = o ? v/o : 0, dif = Math.round(v - o);
+      const c = estado(pct, pal);
+      g += '<rect x="'+(x+2)+'" y="'+(y0+2)+'" width="'+(gw-4)+'" height="'+(rh-4)+'" rx="6" fill="'+c+'" opacity="0.9"/>';
+      g += '<text x="'+(x+gw/2)+'" y="'+(y0+rh/2-1)+'" font-size="14" font-weight="800" text-anchor="middle" fill="#10161d">'+Math.round(pct*100)+'%</text>';
+      g += '<text x="'+(x+gw/2)+'" y="'+(y0+rh/2+15)+'" font-size="11" font-weight="700" text-anchor="middle" fill="#10161d">'+(dif > 0 ? '+' : dif < 0 ? '−' : '')+Math.abs(dif)+' g</text>';
+    });
   });
+  ds.forEach((d, i) => g += '<text x="'+(ml+i*gw+gw/2)+'" y="'+(mt+rh*3+20)+'" font-size="13" font-weight="800" text-anchor="middle" fill="'+pal.txt+'">'+d.lbl.slice(0,3)+'</text>');
   return g + '</svg>';
+}
+function leyendaMacros(pal){ return leyenda([['Cubre 95–105 %', pal.ok], ['±10 %', pal.warn], ['Fuera de rango', pal.bad]], pal) + '<p style="font-size:13px;color:'+pal.muted+';margin:2px 0 0">Cada casilla: % del objetivo del día y gramos de más (+) o de menos (−).</p>'; }
+function lecturaRapida(ds, rs, kg, pal){
+  const c = ds.filter(d => d.obj && d.menu); if (!c.length) return '';
+  const fin = d => d.real || d.menu, out = [];
+  const med = (k, f) => c.reduce((a, d) => a + f(d)[k], 0)/c.length;
+  [['prot','Proteína','proteína'],['carb','Carbohidratos','hidratos'],['fat','Grasa','grasa']].forEach(([k, N, n]) => {
+    const o = med(k, d => d.obj), m = med(k, fin), dif = m - o, pct = o ? m/o : 1;
+    const ico = pct >= 0.95 && pct <= 1.05 ? '✅' : (pct >= 0.9 && pct <= 1.1 ? '🟡' : '🔴');
+    out.push(ico+' <b>'+N+'</b>: '+(Math.abs(pct-1) <= 0.05 ? 'bien cubierta' : dif < 0 ? 'faltan unos '+Math.abs(Math.round(dif))+' g al día ('+Math.round(pct*100)+' %)' : 'sobran unos '+Math.round(dif)+' g al día ('+Math.round(pct*100)+' %)')+'.');
+  });
+  const malos = c.filter(d => { const p = fin(d).kcal/d.obj.kcal; return p < 0.9 || p > 1.1; });
+  out.push((malos.length ? '🔴 Energía: '+malos.map(d => d.lbl.slice(0,3)+' '+Math.round(fin(d).kcal/d.obj.kcal*100)+' %').join(', ')+' se salen del ±10 %.' : '✅ Energía: todos los días con menú están dentro del ±10 % del objetivo.'));
+  const cargas = c.filter(d => d.nivel >= 3 && fin(d).kcal < d.obj.kcal*0.95);
+  if (cargas.length) out.push('⚠️ '+cargas.map(d => d.lbl.slice(0,3)).join(', ')+': día de carga con menos energía de la necesaria; sube raciones antes de entrenar.');
+  const deficit = c.filter(d => d.nivel >= 3 && d.obj.kcal < d.gasto - 1);
+  if (deficit.length) out.push('⚠️ Hay déficit en un día de entreno Medio/Alto; no debería.');
+  return '<ul style="margin:0 0 4px 0;padding:0;list-style:none;font-size:'+(pal === PAL_PDF ? 13 : 16)+'px;line-height:1.5">'+out.map(x => '<li style="margin-bottom:4px">'+x+'</li>').join('')+'</ul>';
 }
 function tablaCifras(ds, pal){
   const f = (v) => v ? fmtN(v.kcal) : '–';
@@ -750,15 +781,14 @@ function vPdf(p){
   h += '<section><h2>Cómo cuadra el menú con la semana de entreno</h2>'+explicacionSemana(p, ds, rs)+'</section>';
   if (rs.nMenu) {
     h += '<section><h2>Resumen</h2><div class="kpis"><div><span>Objetivo medio</span><b>'+fmtN(rs.objMedio)+' kcal</b></div><div><span>Menú medio</span><b>'+fmtN(rs.menuMedio)+' kcal</b></div><div><span>Cubierto</span><b>'+Math.round(rs.cobertura*100)+' %</b></div><div><span>Balance semanal</span><b>'+(rs.balance >= 0 ? '+' : '−')+fmtN(Math.abs(rs.balance))+' kcal</b></div></div>' +
-      '<div class="g2"><div><h3>Energía por día (kcal)</h3>'+chartKcal(ds, PAL_PDF)+leyenda([['Gasto', PAL_PDF.gasto, 'linea'], ['Objetivo', PAL_PDF.obj, 'hueco'], ['Menú', PAL_PDF.menu], ...(hayR ? [['Real', PAL_PDF.real]] : [])], PAL_PDF)+'</div>' +
+      '<h3>Lectura rápida</h3>'+lecturaRapida(ds, rs, kg, PAL_PDF)+'<div class="g2"><div><h3>Energía por día (kcal)</h3>'+chartKcal(ds, PAL_PDF)+leyendaKcal(PAL_PDF, hayR)+'</div>' +
       '<div><h3>Macros: necesarios y en el menú</h3>'+barrasMacros(ds, PAL_PDF, kg)+'</div></div>' +
-      '<div class="g2"><div><h3>Reparto de macros por día</h3>'+chartMacrosDia(ds, PAL_PDF)+leyenda([['Proteína', PAL_PDF.P], ['Carbohidratos', PAL_PDF.C], ['Grasa', PAL_PDF.G]], PAL_PDF)+'<p class="mut" style="font-size:11px">Tenue: objetivo · Intenso: menú.</p></div><div><h3>Cifras por día</h3>'+tablaCifras(ds, PAL_PDF)+'</div></div></section>';
-    h += '<section class="newpage"><h2>Menú de la semana</h2>'+tablaMenuPdf(p)+'</section>';
-    h += cambiosPdf();
+      '<div class="g2"><div><h3>Macros día a día</h3>'+chartMacrosDia(ds, PAL_PDF)+leyendaMacros(PAL_PDF)+'</div><div><h3>Cifras por día</h3>'+tablaCifras(ds, PAL_PDF)+'</div></div></section>';
+    h += '<section class="menupage"><h2>Menú de la semana</h2>'+tablaMenuPdf(p)+'</section>';
+    h += '<div class="afterpage">'+cambiosPdf()+'</div>';
   } else h += '<section><p class="mut">Esta semana aún no tiene menú.</p></section>';
-  h += '<section><h2>Pautas a seguir</h2><ul>'+pautasAuto(p, ds, rs).map(x => '<li>'+x+'</li>').join('')+'</ul>' +
+  h += '<section class="'+(rs.nMenu ? '' : '')+'"><h2>Pautas a seguir</h2><ul>'+pautasAuto(p, ds, rs).map(x => '<li>'+x+'</li>').join('')+'</ul>' +
     (S.notas && S.notas.trim() ? '<h3>Notas del nutricionista</h3><p style="white-space:pre-wrap">'+esc(S.notas.trim())+'</p>' : '')+'</section>';
-  const compra = vCompra(true); if (compra) h += '<section class="newpage">'+compra.replace('<div class="card">', '<div>').replace('<h3>Lista de la compra</h3>', '<h2>Lista de la compra</h2>')+'</section>';
   h += '<footer>Generado el '+fechaCorta(iso(new Date()))+' con RPT Nutrición · Las cifras son estimaciones orientativas.</footer></div></div>';
   return h;
 }
@@ -774,12 +804,12 @@ function vInforme(p){
     kpi('Objetivo medio', fmtN(rs.objMedio)+' kcal', 'por día') + kpi('Menú medio', fmtN(rs.menuMedio)+' kcal', (hayR ? 'con lo realmente comido' : 'por día')) +
     kpi('Cubierto', Math.round(rs.cobertura*100)+'%', 'del objetivo', rs.cobertura >= 0.95 && rs.cobertura <= 1.05 ? 'var(--t-good-fg)' : 'var(--t-chg-fg)') +
     kpi('Balance semanal', (bal >= 0 ? '+' : '−')+fmtN(Math.abs(bal))+' kcal', 'frente al gasto estimado (≈ '+(bal >= 0 ? '+' : '−')+Math.round(grasa)+' g de grasa)', colBal) + '</div></div>';
-  h += '<div class="card"><h3 style="margin-bottom:0">Carga energética por día</h3><p class="sub" style="margin-bottom:6px">kcal: gasto estimado, objetivo y menú'+(hayR ? ' y real' : '')+'.</p>' +
-    chartKcal(ds, PAL_APP) + leyenda([['Gasto estimado', PAL_APP.gasto, 'linea'], ['Objetivo', PAL_APP.obj, 'hueco'], ['Menú', PAL_APP.menu], ...(hayR ? [['Real', PAL_APP.real]] : [])], PAL_APP) +
+  h += '<div class="card"><h3>Lectura rápida</h3>'+lecturaRapida(ds, rs, kg, PAL_APP)+'</div>';
+  h += '<div class="card"><h3 style="margin-bottom:0">Energía por día (kcal)</h3><p class="sub" style="margin-bottom:6px">La barra gris es lo que necesitas ese día; la de color, lo que aporta el menú. La línea discontinua es lo que gastas.</p>' +
+    chartKcal(ds, PAL_APP) + leyendaKcal(PAL_APP, hayR) +
     '<div style="margin-top:10px">'+tablaCifras(ds, PAL_APP)+'</div></div>';
   h += '<div class="card"><h3>Macros: necesarios y en el menú</h3>' + barrasMacros(ds, PAL_APP, kg) + '</div>';
-  h += '<div class="card"><h3 style="margin-bottom:0">Reparto de macros por día</h3><p class="sub" style="margin-bottom:6px">Cada día: objetivo (tenue) y menú (intenso), en kcal por macro.</p>' +
-    chartMacrosDia(ds, PAL_APP) + leyenda([['Proteína', PAL_APP.P], ['Carbohidratos', PAL_APP.C], ['Grasa', PAL_APP.G]], PAL_APP) + '</div>';
+  h += '<div class="card"><h3>Macros día a día</h3>' + chartMacrosDia(ds, PAL_APP) + leyendaMacros(PAL_APP) + '</div>';
   h += vCompra(false);
   h += '<div class="card"><h3>Informe en PDF</h3><p class="sub" style="margin-bottom:8px">Notas para el paciente: aparecerán en el informe, junto a las pautas automáticas.</p>' +
     '<div class="field"><label class="f" for="notas">Notas del nutricionista (esta semana)</label><textarea id="notas" rows="5" style="padding:12px 14px;line-height:1.4">'+esc(S.notas || '')+'</textarea></div>' +
