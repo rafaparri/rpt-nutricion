@@ -33,7 +33,7 @@ const S = {
   weights:[], weekStart:lunesISO(new Date()), levels:null,
   links:[], requests:[], wo:{}, woPlanId:null, woMsg:null,
   recipes:[], sharedRecipes:[], rtab:'mias', rq:'', cola:[], rmsg:null,
-  menu:null, slot:null,
+  menu:null, slot:null, prefs:{},
   msg:null, msgOk:false, busy:false
 };
 const refPac = pid => db.collection('nu_patients').doc(pid);
@@ -304,8 +304,10 @@ async function guardarMenu(){
     return true;
   } catch(e){ setMsg('No se pudo guardar el menú ('+((e && (e.code||e.message)) || 'error')+'). Lo que ves no está guardado.', false); console.error('menu', e); render(); return false; }
 }
+const fijasDe = p => (p.fijas !== undefined && p.fijas !== null) ? p.fijas : (S.prefs.fijas || {});
+const fijasPropias = p => p.fijas !== undefined && p.fijas !== null;
 const fijaDe = (p, slot, i) => {
-  const f = p.fijas && p.fijas[slot];
+  const f = fijasDe(p)[slot];
   if (!f || !f.rid || !Array.isArray(f.days) || f.days.indexOf(i) < 0) return null;
   const r = S.recipes.find(x => x.id === f.rid);
   return r ? {r, s:Number(f.s) > 0 ? Number(f.s) : 1} : null;
@@ -352,7 +354,7 @@ function vMenu(p){
   let html = '<div class="card"><h3>Menú de la semana</h3>' +
     '<p class="sub" style="margin-bottom:10px">'+(hay ? 'Toca una comida para cambiar la receta o la ración.' : 'La app propone una receta para cada comida, con la ración ajustada a las kcal y macros del día.')+'</p>' +
     '<div class="btn-row"><button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Proponer de nuevo' : '✨ Proponer menú')+'</button><button class="btn secondary" data-act="repartoDlg">Reparto</button></div>' +
-    '<button class="btn secondary" style="margin-top:10px" data-act="fijasDlg">📌 Comidas fijas'+(Object.keys(p.fijas||{}).some(k => p.fijas[k] && p.fijas[k].rid) ? ' ('+Object.keys(p.fijas).filter(k => p.fijas[k] && p.fijas[k].rid).length+')' : '')+'</button></div>';
+    '<button class="btn secondary" style="margin-top:10px" data-act="fijasDlg">📌 Comidas fijas'+(() => { const f = fijasDe(p), n = Object.keys(f).filter(k => f[k] && f[k].rid).length; return n ? ' ('+n+(fijasPropias(p) ? '' : ', por defecto')+')' : ''; })()+'</button></div>';
   if (!hay) return html;
   html += DIAS.map((d, i) => {
     const dia = S.menu[i]; if (!dia || !dia.meals || !dia.meals.length) return '';
@@ -411,7 +413,7 @@ function dlgFijas(){
   const p = pacienteActual(); if (!p) return;
   const recs = S.recipes.slice().sort(porNombre);
   const bloques = repartoDe(p).map(([slot], i) => {
-    const f = (p.fijas && p.fijas[slot]) || {};
+    const f = fijasDe(p)[slot] || {};
     const dias = Array.isArray(f.days) ? f.days : [0,1,2,3,4];
     return '<div class="card" style="margin-bottom:12px"><h3>'+esc(slot)+'</h3>' +
       '<div class="field"><label class="f" for="fx'+i+'">Receta fija</label><select id="fx'+i+'"><option value="">— ninguna (la app elige) —</option>' +
@@ -421,9 +423,13 @@ function dlgFijas(){
       '<div class="field"><label class="f" for="fs'+i+'">Ración (1 = la receta entera)</label><input id="fs'+i+'" inputmode="decimal" value="'+esc(kgTxt(f.s || 1))+'"></div></div>';
   }).join('');
   abrirDlg('<h2>Comidas fijas</h2><p class="sub" style="margin-bottom:12px">Comidas que se repiten (por ejemplo, el desayuno de lunes a viernes). El resto del día se reparte contando con ellas. Después puedes cambiar una en un día concreto tocándola.</p>' +
-    bloques + '<div class="msg err" id="fx_msg"></div><div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn" data-act="guardarFijas">Guardar</button></div>');
+    bloques + '<div class="msg err" id="fx_msg"></div>' +
+    '<button class="btn" data-act="guardarFijas" data-todos="1">Guardar para todos mis pacientes</button>' +
+    '<p class="sub" style="margin:4px 0 10px">Se usará con los pacientes que no tengan ajuste propio.</p>' +
+    '<button class="btn secondary" data-act="guardarFijas" data-todos="0">Guardar solo para este paciente</button>' +
+    '<button class="btn ghost" style="margin-top:10px" data-act="cerrar">Cancelar</button>');
 }
-async function guardarFijas(){
+async function guardarFijas(todos){
   const p = pacienteActual(); if (!p) return;
   const fijas = {};
   repartoDe(p).forEach(([slot], i) => {
@@ -432,8 +438,14 @@ async function guardarFijas(){
     const sc = parseFloat(String($('#fs'+i).value).replace(',', '.'));
     fijas[slot] = {rid, days, s:isFinite(sc) && sc > 0 ? Math.round(sc*20)/20 : 1};
   });
-  try { await refPac(p.id).update({fijas}); p.fijas = fijas; cerrarDlg(); setMsg('Comidas fijas guardadas. Pulsa «Proponer menú» para aplicarlas.', true); }
-  catch(e){ $('#fx_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
+  try {
+    if (todos) {
+      await db.collection('users').doc(S.user.uid).update({nuPrefs:Object.assign({}, S.prefs, {fijas})});
+      S.prefs = Object.assign({}, S.prefs, {fijas});
+      await refPac(p.id).update({fijas:firebase.firestore.FieldValue.delete()}); delete p.fijas;
+    } else { await refPac(p.id).update({fijas}); p.fijas = fijas; }
+    cerrarDlg(); setMsg(todos ? 'Comidas fijas guardadas para todos tus pacientes. Pulsa «Proponer menú» para aplicarlas.' : 'Comidas fijas guardadas para este paciente. Pulsa «Proponer menú» para aplicarlas.', true);
+  } catch(e){ $('#fx_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
   render();
 }
 function dlgReparto(){
@@ -939,7 +951,7 @@ document.addEventListener('click', e => {
     case 'proponerMenu': proponerMenu(); break;
     case 'repartoDlg': dlgReparto(); break;
     case 'fijasDlg': dlgFijas(); break;
-    case 'guardarFijas': guardarFijas(); break;
+    case 'guardarFijas': guardarFijas(t.dataset.todos === '1'); break;
     case 'guardarReparto': guardarReparto(); break;
     case 'slotMenu': S.slotQ = ''; S.slot = {d:parseInt(t.dataset.d,10), m:parseInt(t.dataset.m,10)}; dlgSlot(); break;
     case 'escalaSlot': cambiarSlot(m => { m.s = Math.round(clamp(m.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }); break;
@@ -1001,6 +1013,7 @@ auth.onAuthStateChanged(async u => {
     // Ficha básica (nombre/correo); si ya existe por WorkOut no se toca.
     const ur = db.collection('users').doc(u.uid);
     const ud = await ur.get();
+    S.prefs = (ud.exists && ud.data().nuPrefs) || {};
     if (!ud.exists) await ur.set({email:u.email, name:u.displayName || (u.email||'').split('@')[0], createdAt:Date.now()});
     const g = await ur.collection('roleGrants').doc('nutritionist').get();
     S.isNutri = g.exists;
