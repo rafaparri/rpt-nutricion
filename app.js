@@ -216,11 +216,12 @@ function vCompeticion(p){
   const cs = compsProximas(p);
   const filas = cs.map(c => {
     const falta = !c.weighIn || !c.start;
-    return '<div class="row"><div class="grow"><b>'+esc(c.name)+'</b><p class="sub">'+fechaCorta(c.date)+(c.category ? ' · '+esc(c.category) : '')+(c.manual ? ' · a mano' : '')+'<br>' +
-      (falta ? '⏰ Faltan las horas' : 'Pesaje '+esc(c.weighIn)+' · Inicio '+esc(c.start))+'</p></div>' +
-      '<button class="btn '+(falta ? '' : 'secondary')+'" data-act="horasComp" data-k="'+esc(c.key)+'">'+(falta ? 'Poner horas' : 'Editar')+'</button></div>';
+    return '<div style="padding:12px 0;border-top:1px solid var(--t-line)"><b style="font-size:1.1em">'+esc(c.name)+'</b>' +
+      '<p class="sub" style="margin:4px 0 10px">'+fechaCorta(c.date)+(c.category ? ' · '+esc(c.category) : '')+(c.manual ? ' · a mano' : '')+'<br>' +
+      (falta ? '⏰ Faltan las horas' : 'Pesaje '+esc(c.weighIn)+' · Inicio '+esc(c.start))+'</p>' +
+      '<button class="btn '+(falta ? '' : 'secondary')+'" style="width:100%" data-act="horasComp" data-k="'+esc(c.key)+'">'+(falta ? 'Poner horas' : 'Editar horas')+'</button></div>';
   }).join('');
-  return '<div class="card"><h3>Competición</h3>' + (filas ? '<div class="list">'+filas+'</div>' : '<p class="sub" style="margin-bottom:10px">No hay competiciones próximas.</p>') +
+  return '<div class="card"><h3>Competición</h3>' + (filas ? filas : '<p class="sub" style="margin-bottom:10px">No hay competiciones próximas.</p>') +
     '<button class="btn ghost" style="margin-top:10px" data-act="horasComp" data-k="">＋ Añadir competición a mano</button></div>';
 }
 function calcDia(p, nivel, fecha, kg, comp){
