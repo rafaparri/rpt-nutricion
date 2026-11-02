@@ -25,7 +25,11 @@ const EXTRA_FOODS = {
   "bebida de soja": [33,3.3,0.5,1.8,200], "bebida de avena": [45,1,8,1.5,200], "proteina en polvo": [400,80,8,6,30],
   "crema de cacahuete": [600,25,20,50,15], "cacahuete": [567,26,16,49,1], "pistacho": [560,20,28,45,1], "avellana": [628,15,17,61,1],
   "semillas de chia": [486,17,42,31,10], "semillas de lino": [534,18,29,42,10], "hummus": [166,8,14,10,30],
-  "aceituna": [115,0.8,6,11,4],
+  "aceituna": [115,0.8,6,11,4], "garbanzo seco": [364,19,61,6,100], "lenteja seca": [336,24,52,1.5,100],
+  "tortita de trigo": [300,8,50,7,40], "tortilla de trigo": [300,8,50,7,40], "crema de soja para cocinar": [105,2.2,3,9,100],
+  "cerveza": [41,0.4,3.1,0,330], "callos a la madrilena": [140,13,2,9,150], "calamares fritos": [230,12,15,14,100], "patatas bravas": [180,2.5,22,9,150],
+  "noquis": [150,3.5,32,0.5,150], "albahaca": [23,3.2,2.7,0.6,5], "mayonesa ligera": [275,0.8,5,28,15], "brotes de soja": [30,3,6,0.2,100],
+  "yogur proteico": [55,10,3.5,0.3,125], "arroz cocido": [130,2.7,28,0.3,150], "pinon": [673,14,13,68,1], "pinones": [673,14,13,68,1], "garbanzos secos": [364,19,61,6,100], "nabo": [28,0.9,6,0.1,150],
   "carne picada de vacuno": [190,18,2.4,12,125], "carne picada vacuno": [190,18,2.4,12,125], "picada de vacuno": [190,18,2.4,12,125], "burger meat": [190,18,2.4,12,125],
   "queso feta": [264,14,4,21,30], "feta": [264,14,4,21,30], "queso rallado": [330,24,1,25,10], "mozzarella": [280,22,2,20,30],
   "queso curado": [400,28,1,32,20], "queso anejo": [400,28,1,32,20],
@@ -55,7 +59,7 @@ function stem(p){
 const ALIAS_ORDEN = Object.keys(ALIAS).sort((a, b) => b.length - a.length);
 function traducirIngles(t){
   let r = t;
-  ALIAS_ORDEN.forEach(a => { const an = normalizar(a); if (an && r.indexOf(an) >= 0) r = r.split(an).join(normalizar(ALIAS[a])); });
+  ALIAS_ORDEN.forEach(a => { const an = normalizar(a); if (an && r.indexOf(an) >= 0) { const esc = an.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); r = r.replace(new RegExp('(^|[^a-z])' + esc + '(?![a-z])', 'g'), (m, pre) => pre + normalizar(ALIAS[a])); } });
   return r;
 }
 
@@ -85,8 +89,10 @@ function buscarIngrediente(nombreNorm){
     const coinc = pk.filter(k => ing.some(i => k === i || parte(k, i) || parte(i, k))).length;
     if (coinc !== pk.length) continue;
     const esPrincipal = pk.some(k => k === primera || (primera !== undefined && (parte(k, primera) || parte(primera, k))));
-    if (esPrincipal && !mejorPrincipal) { mejor = clave; mejorP = coinc; mejorPrincipal = true; }
-    else if (esPrincipal === mejorPrincipal && coinc > mejorP) { mejor = clave; mejorP = coinc; }
+    const exacta = pk.length === 1 && pk[0] === primera ? 0.5 : 0; // la palabra exacta gana a la que solo la contiene (pinon / champinon)
+    const punt = coinc + exacta;
+    if (esPrincipal && !mejorPrincipal) { mejor = clave; mejorP = punt; mejorPrincipal = true; }
+    else if (esPrincipal === mejorPrincipal && punt > mejorP) { mejor = clave; mejorP = punt; }
   }
   return mejor;
 }
@@ -271,7 +277,7 @@ function parseLineas(parrafos){
     if (!listas[dest]) return;
     let frag = texto.split('\n');
     if (dest === 'ingredientes') { const e = []; frag.forEach(f => f.split(',').forEach(x => e.push(x))); frag = e; }
-    frag.forEach(s => { s = s.replace(/^[\s\-•*•]+/, '').trim(); s = s.replace(/^\d+[.)]\s*/, ''); if (s) listas[dest].push(s); });
+    frag.forEach(s => { s = s.replace(/^[\s\-•*•]+/, '').trim(); s = s.replace(/^\d+[.)]\s+/, ''); if (s) listas[dest].push(s); });
   };
   for (const linea of parrafos) {
     const limpio = linea.trim(); if (!limpio) continue;
