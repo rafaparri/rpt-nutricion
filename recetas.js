@@ -195,7 +195,14 @@ function detectarSeccion(n){
   for (const p of ['ESTUDIO ENERGETICO','INFORMACION NUTRICIONAL','VALOR NUTRICIONAL','APORTE CALORICO','APORTE NUTRICIONAL','DATOS NUTRICIONALES','ANALISIS NUTRICIONAL','VALORES NUTRICIONALES','COMPOSICION NUTRICIONAL']) if (n.startsWith(p)) return 'estudio_energetico';
   return null;
 }
-const numEs = t => { const n = parseFloat(String(t).replace(/\./g, '').replace(',', '.')); return isFinite(n) ? n : null; };
+/* «17.5» y «17,5» son decimales; «1.200» (punto + 3 cifras) son miles. */
+const numEs = t => {
+  t = String(t).replace(/[.,]+$/, '');
+  let x;
+  if (/^\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) x = t.replace(/\./g, '').replace(',', '.');
+  else x = t.replace(',', '.');
+  const n = parseFloat(x); return isFinite(n) ? n : null;
+};
 function macrosDeclarados(lineas){
   const res = {}, junto = lineas.join(' ');
   let m = junto.match(/(\d[\d.,]*)\s*k?cal/i);
