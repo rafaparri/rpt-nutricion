@@ -26,7 +26,7 @@ const EXTRA_FOODS = {
   "crema de cacahuete": [600,25,20,50,15], "cacahuete": [567,26,16,49,1], "pistacho": [560,20,28,45,1], "avellana": [628,15,17,61,1],
   "semillas de chia": [486,17,42,31,10], "semillas de lino": [534,18,29,42,10], "hummus": [166,8,14,10,30],
   "aceituna": [115,0.8,6,11,4],
-  "hamburguesa de vacuno": [250,17,0.5,20,100], "hamburguesa": [250,17,0.5,20,100], "burger": [250,17,0.5,20,100],
+  "carne picada de vacuno": [215,18,0,15.5,100], "carne picada vacuno": [215,18,0,15.5,100], "picada de vacuno": [215,18,0,15.5,100],
   "queso feta": [264,14,4,21,30], "feta": [264,14,4,21,30], "queso rallado": [330,24,1,25,10], "mozzarella": [280,22,2,20,30],
   "queso curado": [400,28,1,32,20], "queso anejo": [400,28,1,32,20],
   "macarron": [350,12,71,1.5,100], "macarrones": [350,12,71,1.5,100], "espagueti": [350,12,71,1.5,100], "spaghetti": [350,12,71,1.5,100],
