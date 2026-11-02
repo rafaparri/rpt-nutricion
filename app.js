@@ -1000,6 +1000,7 @@ function vRecetario(){
     '<div class="field" style="margin-top:14px"><label class="f" for="rq">Buscar</label><input id="rq" type="search" value="'+esc(S.rq)+'" placeholder="Nombre, ingrediente, categoría…" autocomplete="off"></div>' +
     (S.rmsg ? '<div class="msg '+(S.rmsgOk?'ok':'err')+'">'+esc(S.rmsg)+'</div>' : '') + filas +
     '<div class="btn-row"><button class="btn" data-act="nuevaReceta">＋ Nueva receta</button><button class="btn secondary" data-act="importarWord">📄 Importar de Word</button></div>' +
+    (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar todas mis recetas ('+S.recipes.length+')</button>' : '') +
     '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
 }
 function vCuenta(){
@@ -1376,6 +1377,25 @@ async function copiarReceta(id){
   catch(e){ $('#r_msg').textContent = 'No se pudo copiar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
   cerrarDlg(); S.rtab = 'mias'; setRmsg('Copiada a tus recetas.', true); render();
 }
+function dlgBorrarTodas(){
+  const n = S.recipes.length; if (!n) return;
+  abrirDlg('<h2>Eliminar todas mis recetas</h2>' +
+    '<p class="sub" style="font-size:18px;margin-bottom:12px">Se eliminarán las <b>'+n+'</b> recetas de «Mis recetas». No se pueden recuperar. Las recetas compartidas por otras personas no se tocan.</p>' +
+    '<p class="sub" style="font-size:18px;margin-bottom:12px">Los menús ya generados conservan sus platos tal como estaban. Para que cambien, hay que volver a generar el menú.</p>' +
+    '<div class="msg err" id="bt_msg"></div>' +
+    '<div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn danger" data-act="borrarTodasOk">Sí, eliminar las '+n+'</button></div>');
+}
+async function borrarTodasOk(btn){
+  btn.disabled = true; btn.textContent = 'Eliminando…';
+  try {
+    const ids = S.recipes.map(r => r.id);
+    for (let i = 0; i < ids.length; i += 400) {
+      const b = db.batch(); ids.slice(i, i+400).forEach(id => b.delete(db.collection('nu_recipes').doc(id))); await b.commit();
+    }
+    await cargarRecetas();
+  } catch(e){ const m = $('#bt_msg'); if (m) m.textContent = 'No se pudo eliminar ('+((e && (e.code||e.message)) || 'error')+').'; btn.disabled = false; btn.textContent = 'Reintentar'; return; }
+  cerrarDlg(); setRmsg('Recetas eliminadas. Ya puedes importar las nuevas.', true); render();
+}
 async function borrarReceta(id, btn){
   if (!btn.dataset.seguro) { btn.dataset.seguro = '1'; btn.textContent = '¿Seguro? Pulsa otra vez para eliminar'; return; }
   try { await db.collection('nu_recipes').doc(id).delete(); await cargarRecetas(); }
@@ -1601,6 +1621,8 @@ document.addEventListener('click', e => {
     case 'compartirReceta': compartirReceta(t.dataset.id); break;
     case 'copiarReceta': copiarReceta(t.dataset.id); break;
     case 'borrarReceta': borrarReceta(t.dataset.id, t); break;
+    case 'borrarTodasDlg': dlgBorrarTodas(); break;
+    case 'borrarTodasOk': borrarTodasOk(t); break;
     case 'horasComp': dlgComp(t.dataset.k || ''); break;
     case 'guardarComp': guardarComp(t.dataset.k || ''); break;
     case 'quitarComp': quitarComp(t.dataset.k); break;
