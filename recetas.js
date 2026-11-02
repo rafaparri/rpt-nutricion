@@ -29,7 +29,7 @@ const EXTRA_FOODS = {
   "tortita de trigo": [300,8,50,7,40], "tortilla de trigo": [300,8,50,7,40], "crema de soja para cocinar": [105,2.2,3,9,100],
   "cerveza": [41,0.4,3.1,0,330], "callos a la madrilena": [140,13,2,9,150], "calamares fritos": [230,12,15,14,100], "patatas bravas": [180,2.5,22,9,150],
   "noquis": [150,3.5,32,0.5,150], "albahaca": [23,3.2,2.7,0.6,5], "mayonesa ligera": [275,0.8,5,28,15], "brotes de soja": [30,3,6,0.2,100],
-  "yogur proteico": [55,10,3.5,0.3,125], "arroz cocido": [130,2.7,28,0.3,150], "pinon": [673,14,13,68,1], "pinones": [673,14,13,68,1], "garbanzos secos": [364,19,61,6,100], "nabo": [28,0.9,6,0.1,150],
+  "yogur proteico": [55,10,3.5,0.3,125], "cafe": [2,0.1,0.3,0,100], "cafe solo": [2,0.1,0.3,0,100], "cafe expreso": [2,0.1,0.3,0,30], "te": [1,0,0.2,0,200], "arroz cocido": [130,2.7,28,0.3,150], "pinon": [673,14,13,68,1], "pinones": [673,14,13,68,1], "garbanzos secos": [364,19,61,6,100], "nabo": [28,0.9,6,0.1,150],
   "carne picada de vacuno": [190,18,2.4,12,125], "carne picada vacuno": [190,18,2.4,12,125], "picada de vacuno": [190,18,2.4,12,125], "burger meat": [190,18,2.4,12,125],
   "queso feta": [264,14,4,21,30], "feta": [264,14,4,21,30], "queso rallado": [330,24,1,25,10], "mozzarella": [280,22,2,20,30],
   "queso curado": [400,28,1,32,20], "queso anejo": [400,28,1,32,20],
@@ -85,7 +85,7 @@ function buscarIngrediente(nombreNorm){
   for (const clave of Object.keys(FOOD_DB)) {
     const pk = clave.split(/\s+/).filter(w => w && !VACIAS.has(w)).map(stem);
     if (!pk.length) continue;
-    const parte = (a, b) => a.length >= 3 && b.indexOf(a) >= 0; // coincidencia por parte de palabra: mínimo 3 letras (evita que «g» encaje con «integral»)
+    const parte = (a, b) => a.length >= 3 && b.indexOf(a) >= 0 && a.length >= 0.6 * b.length; // coincidencia por parte de palabra: mínimo 3 letras (evita que «g» encaje con «integral»)
     const coinc = pk.filter(k => ing.some(i => k === i || parte(k, i) || parte(i, k))).length;
     if (coinc !== pk.length) continue;
     const esPrincipal = pk.some(k => k === primera || (primera !== undefined && (parte(k, primera) || parte(primera, k))));
