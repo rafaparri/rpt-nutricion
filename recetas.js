@@ -39,6 +39,41 @@ const EXTRA_FOODS = {
 };
 Object.keys(EXTRA_FOODS).forEach(k => { if (!D.FOOD_DB[k]) D.FOOD_DB[k] = EXTRA_FOODS[k]; });
 
+/* Valores contrastados con fuentes oficiales: kcal, proteína, hidratos, grasa por 100 g (peso de una unidad, si se conoce).
+   FEN = Fundación Española de la Nutrición (Mercado de los alimentos FEN / FEDECARNE-FEN, alimento crudo, porción comestible).
+   OFF = Open Food Facts (etiqueta de producto de Mercadona/Hacendado u otra marca, por 100 g tal como se vende).
+   Estos valores sustituyen a los de la tabla anterior cuando el alimento ya existía. */
+const FUENTES_ALIM = {
+  /* ---- FEN: frescos ---- */
+  "pechuga de pollo": [112,21.8,0,2.8,null,"FEN"], "pollo": [167,20,0,9.7,null,"FEN (pollo entero)"], "merluza": [89,15.9,0,2.8,null,"FEN"],
+  "salmon": [182,18.4,0,12,null,"FEN"], "sardina": [140,18.1,0,7.5,80,"FEN"], "caballa": [150,15,0,10,null,"FEN"], "sepia": [71,16.1,0,0.7,null,"FEN"],
+  "jibia": [71,16.1,0,0.7,null,"FEN (sepia)"], "pota": [71,16.1,0,0.7,null,"FEN (sepia)"], "langostino": [93,20.1,0,1.4,20,"FEN"],
+  "gamba": [93,20.1,0,1.4,null,"FEN (langostino)"], "magro de cerdo": [115,20.5,0.6,3.4,null,"FEN (magro de cuello)"],
+  "patata": [88,2.5,18,0.2,null,"FEN"], "boniato": [101,1.2,21.5,0.6,200,"FEN (batata)"], "batata": [101,1.2,21.5,0.6,200,"FEN"],
+  "cebolla": [23,1.4,3.5,0.2,null,"FEN"], "calabacin": [14,0.6,2.2,0.2,null,"FEN"], "pepino": [13,0.7,1.9,0.2,200,"FEN"],
+  "berenjena": [27,1.2,4.4,0.2,null,"FEN"], "tomate": [22,1,3.5,0.11,null,"FEN"], "zanahoria": [40,0.9,7.3,0.2,null,"FEN"], "remolacha": [37,1.3,6.4,0,100,"FEN"],
+  "aguacate": [141,1.5,5.9,12,null,"FEN"], "platano": [94,1.2,20,0.3,null,"FEN"], "banana": [94,1.2,20,0.3,null,"FEN (plátano)"],
+  "huevo": [150,12.5,0.3,11.1,null,"FEN (porción comestible)"],
+  "arroz": [381,7,86,0.9,null,"FEN (crudo)"], "arroz basmati": [381,7,86,0.9,null,"FEN (arroz)"], "pasta": [375,12,75.8,1.8,null,"FEN (cruda)"],
+  "fideo": [375,12,75.8,1.8,null,"FEN (pasta)"], "fideos": [375,12,75.8,1.8,null,"FEN (pasta)"], "pan integral": [258,8,49,1.4,null,"FEN"], "pan": [277,7.8,58,1,null,"FEN (pan blanco)"],
+  "aceite de oliva": [899,0,0,99.9,null,"FEN"], "yogur": [57,3.7,4.4,2.7,null,"FEN (natural)"],
+  "almendra": [604,20,3.5,53.5,null,"FEN"], "pinon": [693,14,4,68.6,null,"FEN"], "pinones": [693,14,4,68.6,null,"FEN"],
+  "garbanzo seco": [373,19.4,55,5,null,"FEN"], "garbanzos secos": [373,19.4,55,5,null,"FEN"], "lenteja seca": [351,23.8,54,1.8,null,"FEN"], "alubia seca": [349,19,52.5,1.4,null,"FEN"],
+  /* ---- OFF: productos de supermercado ---- */
+  "atun": [98,21,0.9,1.2,null,"OFF (Hacendado, al natural)"], "jamon": [247,33.5,1,12.2,null,"OFF (Hacendado, serrano reserva)"],
+  "queso feta": [276,16,1,23.2,null,"OFF (Hacendado)"], "feta": [276,16,1,23.2,null,"OFF (Hacendado)"],
+  "queso de untar ligero": [154,5.9,4.1,12,20,"OFF (Philadelphia light)"], "leche de coco": [163,3.5,3.5,16,null,"OFF (Goya)"],
+  "avena": [370,14,58,6.5,null,"OFF (Hacendado, copos)"], "quinoa": [389,14,66,6.1,null,"OFF (Hacendado)"],
+  "tofu": [110,11.1,0.9,6.9,125,"OFF (Hacendado, firme)"], "soja texturizada": [326,51,20,1.3,null,"OFF (Hacendado, fina; seca)"],
+  "levadura nutricional": [341,46.4,40.2,4.2,5,"OFF"], "queso cottage": [93,13,1.6,4,null,"OFF (Hacendado)"],
+  "helices de lenteja roja": [347,26,49,2.5,null,"OFF (pasta de lenteja roja, Gallo)"], "pasta de lenteja roja": [347,26,49,2.5,null,"OFF (Gallo)"],
+  "guacamole": [149,1.9,2,13.7,15,"OFF (Hacendado)"], "harina de avena": [403,12,62,9,null,"OFF (Carrefour, integral)"]
+};
+Object.keys(FUENTES_ALIM).forEach(k => {
+  const f = FUENTES_ALIM[k], prev = D.FOOD_DB[k];
+  D.FOOD_DB[k] = [f[0], f[1], f[2], f[3], f[4] !== null ? f[4] : (prev ? prev[4] : 100)];
+});
+
 const IGNORAR = D.IGNORAR, VERBOS = new Set(D.VERBOS), VACIAS = new Set(D.VACIAS);
 const RACIONES_DEF = D.RACIONES;
 
@@ -373,5 +408,5 @@ function ingredienteCompra(linea){
   return { clave: clave !== null ? 'k:' + clave : 'n:' + nn.replace(/[,;(].*$/, '').trim(), nombre: nombreBonito, gramos, uds, cat: categoriaCompra(nn), suelto: gramos === null && uds === null };
 }
 
-window.RPT_RECETAS = { buscarIngrediente, normalizar, ingredienteCompra,  estimarMacros, categorizar, parseIngrediente, leerDocx, recetaDeLineas, parseLineas, lineasDocumento };
+window.RPT_RECETAS = { FUENTES_ALIM, buscarIngrediente, normalizar, ingredienteCompra,  estimarMacros, categorizar, parseIngrediente, leerDocx, recetaDeLineas, parseLineas, lineasDocumento };
 })();
