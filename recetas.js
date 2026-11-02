@@ -25,7 +25,13 @@ const EXTRA_FOODS = {
   "bebida de soja": [33,3.3,0.5,1.8,200], "bebida de avena": [45,1,8,1.5,200], "proteina en polvo": [400,80,8,6,30],
   "crema de cacahuete": [600,25,20,50,15], "cacahuete": [567,26,16,49,1], "pistacho": [560,20,28,45,1], "avellana": [628,15,17,61,1],
   "semillas de chia": [486,17,42,31,10], "semillas de lino": [534,18,29,42,10], "hummus": [166,8,14,10,30],
-  "aceituna": [115,0.8,6,11,4], "tomate frito": [80,1.5,10,4,30], "judia verde": [31,1.8,7,0.2,100]
+  "aceituna": [115,0.8,6,11,4],
+  "hamburguesa de vacuno": [250,17,0.5,20,100], "hamburguesa": [250,17,0.5,20,100], "burger": [250,17,0.5,20,100],
+  "queso feta": [264,14,4,21,30], "feta": [264,14,4,21,30], "queso rallado": [330,24,1,25,10], "mozzarella": [280,22,2,20,30],
+  "queso curado": [400,28,1,32,20], "queso anejo": [400,28,1,32,20],
+  "macarron": [350,12,71,1.5,100], "macarrones": [350,12,71,1.5,100], "espagueti": [350,12,71,1.5,100], "spaghetti": [350,12,71,1.5,100],
+  "margarina": [720,0.2,0.5,80,10], "fuet": [450,26,2,38,10], "castana": [165,2,36,1.5,15],
+  "base de pizza": [270,7.5,50,4,200], "nata agria": [200,3,4,19,15], "sour cream": [200,3,4,19,15], "banana": [89,1.1,23,0.3,120], "tomate frito": [80,1.5,10,4,30], "judia verde": [31,1.8,7,0.2,100]
 };
 Object.keys(EXTRA_FOODS).forEach(k => { if (!D.FOOD_DB[k]) D.FOOD_DB[k] = EXTRA_FOODS[k]; });
 
