@@ -1,6 +1,6 @@
-/* RPT Nutrición — app del nutricionista (y del paciente, en una fase posterior).
+/* RPT Nutrición — app del nutricionista (y del usuario, en una fase posterior).
    Mismo Firebase y misma cuenta que WorkOut 2.0, pero datos propios:
-     nu_patients/{pid}                  ficha del paciente (la crea el nutricionista a mano)
+     nu_patients/{pid}                  ficha del usuario (la crea el nutricionista a mano)
      nu_patients/{pid}/weights/{día}    peso (un registro por día)
      nu_patients/{pid}/weeks/{lunes}    intensidad de entreno de la semana (4 niveles)
    El permiso de nutricionista es users/{uid}/roleGrants/nutritionist. */
@@ -28,7 +28,7 @@ function versionTexto(){
 const S = {
   view:'boot',            // boot | login | activar | app
   user:null, isNutri:false,
-  tab:'pacientes',        // pacientes | recetario | cuenta
+  tab:'pacientes',        // usuarios | recetario | cuenta
   patients:[], pid:null, ptab:'menu', measures:[], side:false, compraOn:false, menuBase:null,
   weights:[], weekStart:lunesISO(new Date()), levels:null,
   links:[], requests:[], wo:{}, woPlanId:null, woMsg:null,
@@ -87,15 +87,15 @@ function topBar(){
     '<div class="brand"><img class="appicon" src="static/icon-192.png" alt="" width="38" height="38"><span>NutriForce</span></div>' +
     (S.user ? '<button class="user" data-act="tab" data-v="cuenta">'+esc((S.user.email||'').split('@')[0])+' ▾</button>' : '') + '</header>';
 }
-/* Menú lateral: lo que son datos de base (paciente, recetario, cuenta). Se puede ocultar. */
+/* Menú lateral: lo que son datos de base (usuario, recetario, cuenta). Se puede ocultar. */
 function sideHtml(){
   if (S.view !== 'app') return '';
   const p = S.pid ? pacienteActual() : null;
   const it = (act, v, ico, txt, cur) => '<button class="sitem" data-act="'+act+'" data-v="'+v+'"'+(cur ? ' aria-current="page"' : '')+'><span class="ico">'+ico+'</span><span>'+txt+'</span></button>';
   return '<div class="sidebk" data-act="side"></div><aside class="side'+(S.side ? ' open' : '')+'" aria-label="Menú">' +
     '<div class="sidehead"><b>Menú</b><button class="btn small secondary" data-act="side" aria-label="Cerrar el menú">✕</button></div>' +
-    it('tab', 'pacientes', '👥', 'Pacientes', S.tab === 'pacientes' && !(p && S.ptab === 'datos')) +
-    (p ? '<div class="sgroup">Paciente: '+esc(p.name)+'</div>' + it('sideDatos', 'datos', '📋', 'Datos, peso y WorkOut', S.tab === 'pacientes' && S.ptab === 'datos') : '') +
+    it('tab', 'pacientes', '👥', 'Usuarios', S.tab === 'pacientes' && !(p && S.ptab === 'datos')) +
+    (p ? '<div class="sgroup">Usuario: '+esc(p.name)+'</div>' + it('sideDatos', 'datos', '📋', 'Datos, peso y WorkOut', S.tab === 'pacientes' && S.ptab === 'datos') : '') +
     '<div class="sgroup">Base</div>' +
     it('tab', 'recetario', '📖', 'Recetario', S.tab === 'recetario') +
     it('tab', 'cuenta', '⚙️', 'Cuenta', S.tab === 'cuenta') + '</aside>';
@@ -116,9 +116,9 @@ function vLogin(){
 function vActivar(){
   return '<div class="app">'+topBar()+'<div class="content">' +
     '<h1>Bienvenido</h1>' + solicitudesHtml() +
-    '<div class="card"><h3>Soy nutricionista</h3><p class="sub" style="margin-bottom:14px">Podrás crear tus pacientes, marcar su semana de entreno y preparar sus menús.</p>' +
+    '<div class="card"><h3>Soy nutricionista</h3><p class="sub" style="margin-bottom:14px">Podrás crear tus usuarios, marcar su semana de entreno y preparar sus menús.</p>' +
     '<button class="btn" data-act="activar">Activar modo nutricionista</button></div>' +
-    '<div class="card"><h3>Soy paciente</h3><p class="sub">Tu nutricionista te dará acceso con tu correo. Cuando lo haga, tu menú aparecerá aquí.</p></div>' +
+    '<div class="card"><h3>Soy usuario</h3><p class="sub">Tu nutricionista te dará acceso con tu correo. Cuando lo haga, tu menú aparecerá aquí.</p></div>' +
     msgHtml() +
     '<button class="btn secondary" data-act="salir">Salir</button></div></div>';
 }
@@ -127,18 +127,18 @@ function vPacientes(){
     ? '<div class="list">' + S.patients.map(p =>
         '<button class="row" data-act="abrir" data-id="'+esc(p.id)+'"><div class="avatar">'+esc((p.name||'?').trim().charAt(0).toUpperCase())+'</div>' +
         '<div class="grow"><b>'+esc(p.name)+'</b><p class="sub">'+esc([p.sex, p.heightCm ? p.heightCm+' cm' : '', p.goal].filter(Boolean).join(' · ') || 'Sin más datos')+'</p></div><span class="chev">›</span></button>').join('') + '</div>'
-    : '<div class="empty">Todavía no tienes pacientes.<br>Crea el primero con el botón de abajo.</div>';
-  return '<div class="crumbs"><b>Pacientes</b></div><div class="content"><h1>Pacientes</h1>'+solicitudesHtml()+lista+
-    '<button class="btn" data-act="nuevo">＋ Nuevo paciente</button></div>';
+    : '<div class="empty">Todavía no tienes usuarios.<br>Crea el primero con el botón de abajo.</div>';
+  return '<div class="crumbs"><b>Usuarios</b></div><div class="content"><h1>Usuarios</h1>'+solicitudesHtml()+lista+
+    '<button class="btn" data-act="nuevo">＋ Nuevo usuario</button></div>';
 }
 function vPaciente(){
   const p = pacienteActual();
-  if (!p) return '<div class="content"><div class="empty">Paciente no encontrado.</div></div>';
+  if (!p) return '<div class="content"><div class="empty">Usuario no encontrado.</div></div>';
   const t = (v, txt) => '<button role="tab" data-act="ptab" data-v="'+v+'" aria-selected="'+(S.ptab===v)+'">'+txt+'</button>';
   const tabs = '<div class="tabs" role="tablist">'+t('entreno','Entreno')+t('menu','Menú')+t('informe','Informe')+(S.compraOn ? t('compra','🛒 Compra') : '')+'</div>';
   const kg = kgDe();
   const cuerpo = S.ptab==='datos' ? vResumen(p) : S.ptab==='entreno' ? vEntreno(p) : S.ptab==='informe' ? vInforme(p) : S.ptab==='compra' ? vCompraTab(p) : vMenuTab(p);
-  return '<div class="crumbs"><a href="#" data-act="volver">Pacientes</a> › <b>'+esc(p.name)+'</b></div><div class="content">' +
+  return '<div class="crumbs"><a href="#" data-act="volver">Usuarios</a> › <b>'+esc(p.name)+'</b></div><div class="content">' +
     '<div class="pacthead"><h1>'+esc(p.name)+'</h1><button class="pesochip" data-act="pesoDlg" aria-label="Anotar peso">⚖️ '+(kg ? kgTxt(kg)+' kg' : 'Anotar peso')+'</button></div>' + avisosHtml(p) + tabs + cuerpo + '</div>';
 }
 function vResumen(p){
@@ -159,11 +159,11 @@ function vWorkOutCard(p){
   const l = linkDe(p.id);
   let cuerpo;
   if (!l || l.status === 'revoked' || l.status === 'rejected') {
-    cuerpo = (l ? '<p class="sub" style="margin-bottom:10px">'+(l.status==='rejected' ? 'El paciente rechazó la solicitud.' : 'El paciente retiró el permiso.')+'</p>' : '') +
-      '<p class="sub" style="margin-bottom:12px">Si el paciente usa WorkOut, puedes leer su semana, competiciones y peso, con su permiso.</p>' +
+    cuerpo = (l ? '<p class="sub" style="margin-bottom:10px">'+(l.status==='rejected' ? 'El usuario rechazó la solicitud.' : 'El usuario retiró el permiso.')+'</p>' : '') +
+      '<p class="sub" style="margin-bottom:12px">Si el usuario usa WorkOut, puedes leer su semana, competiciones y peso, con su permiso.</p>' +
       '<button class="btn ghost" data-act="vincular">🔗 Vincular con WorkOut</button>';
   } else if (l.status === 'pending') {
-    cuerpo = '<p class="sub" style="margin-bottom:12px">Solicitud enviada a <b>'+esc(l.email)+'</b>. Falta que el paciente la acepte entrando en esta app con ese correo.</p>' +
+    cuerpo = '<p class="sub" style="margin-bottom:12px">Solicitud enviada a <b>'+esc(l.email)+'</b>. Falta que el usuario la acepte entrando en esta app con ese correo.</p>' +
       '<button class="btn secondary" data-act="quitarVinculo" data-id="'+esc(l.id)+'">Cancelar solicitud</button>';
   } else {
     const w = S.wo[p.id];
@@ -206,7 +206,7 @@ function tipoObjetivo(p){
   return /baj|adelgaz|perd|defin/.test(t) ? 'bajar' : /sub|gan|volumen|masa/.test(t) ? 'subir' : 'mantener';
 }
 const claveComp = id => String(id).replace(/[^A-Za-z0-9_-]/g, '_');
-// Competiciones del paciente: las de WorkOut (fechas, con su permiso) + las puestas a mano.
+// Competiciones del usuario: las de WorkOut (fechas, con su permiso) + las puestas a mano.
 // Las horas de pesaje y de inicio siempre las escribe el nutricionista (p.compData).
 function compsDe(p){
   const w = S.wo[p.id], datos = p.compData || {}, out = [], vistas = {};
@@ -462,7 +462,7 @@ async function dlgCopiarSemana(){
     S.semanasMenu = snap.docs.map(d => ({id:d.id, menu:d.data().menu, levels:d.data().levels}))
       .filter(w => w.id !== S.weekStart && Array.isArray(w.menu) && w.menu.some(d => d.meals && d.meals.some(m => m.rid))).sort((a,b) => a.id < b.id ? 1 : -1);
   } catch(e){ abrirDlg('<h2>Copiar menú</h2><div class="msg err">No se pudieron leer las semanas ('+esc((e && (e.code||e.message)) || 'error')+').</div><button class="btn ghost" data-act="cerrar">Cerrar</button>'); return; }
-  if (!S.semanasMenu.length) { abrirDlg('<h2>Copiar menú de otra semana</h2><div class="empty">Este paciente aún no tiene menús en otras semanas.</div><button class="btn ghost" data-act="cerrar">Cerrar</button>'); return; }
+  if (!S.semanasMenu.length) { abrirDlg('<h2>Copiar menú de otra semana</h2><div class="empty">Este usuario aún no tiene menús en otras semanas.</div><button class="btn ghost" data-act="cerrar">Cerrar</button>'); return; }
   abrirDlg('<h2>Copiar menú de otra semana</h2><p class="sub" style="margin-bottom:12px">Se copiará a la semana del '+fechaCorta(S.weekStart).slice(0,5)+'. Sustituye el menú actual de esa semana.</p>' +
     '<label style="display:flex;gap:10px;align-items:center;margin-bottom:12px;font-size:17px"><input id="cp_aj" type="checkbox" checked style="width:24px;min-height:24px"> Ajustar las raciones a los objetivos de esta semana</label>' +
     '<div class="list">' + S.semanasMenu.map(w => '<button class="row" data-act="copiarDe" data-w="'+esc(w.id)+'"><div class="grow"><b>'+fechaCorta(w.id).slice(0,5)+' – '+fechaCorta(sumaDias(w.id,6)).slice(0,5)+'</b><p class="sub">'+w.menu.filter(d => d.meals && d.meals.some(m => m.rid)).length+' días con menú</p></div><span class="chev">›</span></button>').join('') + '</div>' +
@@ -626,9 +626,9 @@ function dlgFijas(){
   }).join('');
   abrirDlg('<h2>Comidas fijas</h2><p class="sub" style="margin-bottom:12px">Comidas que se repiten (por ejemplo, el desayuno de lunes a viernes). El resto del día se reparte contando con ellas. Después puedes cambiar una en un día concreto tocándola.</p>' +
     bloques + '<div class="msg err" id="fx_msg"></div>' +
-    '<button class="btn" data-act="guardarFijas" data-todos="1">Guardar para todos mis pacientes</button>' +
-    '<p class="sub" style="margin:4px 0 10px">Se usará con los pacientes que no tengan ajuste propio.</p>' +
-    '<button class="btn secondary" data-act="guardarFijas" data-todos="0">Guardar solo para este paciente</button>' +
+    '<button class="btn" data-act="guardarFijas" data-todos="1">Guardar para todos mis usuarios</button>' +
+    '<p class="sub" style="margin:4px 0 10px">Se usará con los usuarios que no tengan ajuste propio.</p>' +
+    '<button class="btn secondary" data-act="guardarFijas" data-todos="0">Guardar solo para este usuario</button>' +
     '<button class="btn ghost" style="margin-top:10px" data-act="cerrar">Cancelar</button>');
 }
 async function guardarFijas(todos){
@@ -646,7 +646,7 @@ async function guardarFijas(todos){
       S.prefs = Object.assign({}, S.prefs, {fijas});
       await refPac(p.id).update({fijas:firebase.firestore.FieldValue.delete()}); delete p.fijas;
     } else { await refPac(p.id).update({fijas}); p.fijas = fijas; }
-    cerrarDlg(); setMsg(todos ? 'Comidas fijas guardadas para todos tus pacientes. Pulsa «Proponer menú» para aplicarlas.' : 'Comidas fijas guardadas para este paciente. Pulsa «Proponer menú» para aplicarlas.', true);
+    cerrarDlg(); setMsg(todos ? 'Comidas fijas guardadas para todos tus usuarios. Pulsa «Proponer menú» para aplicarlas.' : 'Comidas fijas guardadas para este usuario. Pulsa «Proponer menú» para aplicarlas.', true);
   } catch(e){ $('#fx_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
   render();
 }
@@ -918,7 +918,7 @@ function vPdf(p){
   let h = '<div class="pdfdoc"><div class="pdfbar"><button class="btn secondary" data-act="pdfCerrar">‹ Cerrar</button><button class="btn" data-act="pdfImprimir">🖨️ Imprimir / Guardar PDF</button></div><div class="pdfpage">';
   const hd = '<header class="wo2head"><img src="static/icon-192.png" alt="NutriForce" width="64" height="64"><div><div class="ttl">INFORME SEMANAL DE NUTRICIÓN</div>' +
     '<div class="l2">Semana  ·  '+fechaCorta(S.weekStart)+' – '+fechaCorta(fin)+'</div>' +
-    '<div class="l2">Paciente: '+esc(p.name)+'  ·  '+esc(p.sex || '')+' · '+edad+' años · '+p.heightCm+' cm · '+kgTxt(kg)+' kg'+(p.goal ? '  ·  Objetivo: '+esc(p.goal) : '')+'</div></div></header>';
+    '<div class="l2">Usuario: '+esc(p.name)+'  ·  '+esc(p.sex || '')+' · '+edad+' años · '+p.heightCm+' cm · '+kgTxt(kg)+' kg'+(p.goal ? '  ·  Objetivo: '+esc(p.goal) : '')+'</div></div></header>';
   h += '<div class="pgrp">'+hd;
   h += '<section><h2>Cómo cuadra el menú con la semana de entreno</h2>'+explicacionSemana(p, ds, rs)+'</section>';
   if (rs.nMenu) {
@@ -983,7 +983,7 @@ function vInforme(p){
     '<div style="margin-top:10px">'+tablaCifras(ds, PAL_APP)+'</div></div>';
   h += '<div class="card"><h3>Macros: necesarios y en el menú</h3>' + barrasMacros(ds, PAL_APP, kg) + '</div>';
   h += '<div class="card"><h3>Macros día a día</h3>' + chartMacrosDia(ds, PAL_APP) + leyendaMacros(PAL_APP) + '</div>';
-  h += '<div class="card"><h3>Informe en PDF</h3><p class="sub" style="margin-bottom:8px">Notas para el paciente: aparecerán en el informe, junto a las pautas automáticas.</p>' +
+  h += '<div class="card"><h3>Informe en PDF</h3><p class="sub" style="margin-bottom:8px">Notas para el usuario: aparecerán en el informe, junto a las pautas automáticas.</p>' +
     '<div class="field"><label class="f" for="notas">Notas del nutricionista (esta semana)</label><textarea id="notas" rows="5" style="padding:12px 14px;line-height:1.4">'+esc(S.notas || '')+'</textarea></div>' +
     '<div class="btn-row"><button class="btn secondary" data-act="guardarNotas">Guardar notas</button><button class="btn" data-act="pdfAbrir">📄 Ver informe</button></div></div>';
   return h;
@@ -1059,7 +1059,7 @@ function abrirDlg(html){ $('#dlgBody').innerHTML = html; $('#dlg').classList.add
 function cerrarDlg(){ $('#dlg').classList.remove('open'); S.slotPend = null; }
 function dlgPaciente(p){
   const v = p || {};
-  abrirDlg('<h2>'+(p?'Editar paciente':'Nuevo paciente')+'</h2>' +
+  abrirDlg('<h2>'+(p?'Editar usuario':'Nuevo usuario')+'</h2>' +
     '<div class="field"><label class="f" for="d_name">Nombre</label><input id="d_name" value="'+esc(v.name||'')+'" autocomplete="off"></div>' +
     '<div class="grid2"><div class="field"><label class="f" for="d_sex">Sexo</label><select id="d_sex">'+['','Mujer','Hombre'].map(o=>'<option'+(o===(v.sex||'')?' selected':'')+' value="'+o+'">'+(o||'—')+'</option>').join('')+'</select></div>' +
     '<div class="field"><label class="f" for="d_year">Año de nacimiento</label><input id="d_year" inputmode="numeric" value="'+esc(v.birthYear||'')+'"></div></div>' +
@@ -1260,7 +1260,7 @@ async function cambiarSemana(n){
 }
 async function borrarPaciente(){
   const p = pacienteActual(); if (!p) return;
-  abrirDlg('<h2>Eliminar paciente</h2><p class="sub" style="margin-bottom:14px">Se borrará a <b>'+esc(p.name)+'</b> con sus pesos y semanas. No se puede deshacer.</p>' +
+  abrirDlg('<h2>Eliminar usuario</h2><p class="sub" style="margin-bottom:14px">Se borrará a <b>'+esc(p.name)+'</b> con sus pesos y semanas. No se puede deshacer.</p>' +
     '<div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn danger" data-act="borrarSeguro">Eliminar</button></div>');
 }
 async function borrarSeguro(){
@@ -1464,7 +1464,7 @@ async function quitarComp(key){
   try { await refPac(p.id).update({compData:datos}); p.compData = datos; cerrarDlg(); } catch(e){ $('#c_msg').textContent = 'No se pudo quitar.'; return; }
   render();
 }
-// Al abrir un paciente: si tiene una competición en los próximos 45 días sin horas, pregunta una vez.
+// Al abrir un usuario: si tiene una competición en los próximos 45 días sin horas, pregunta una vez.
 function preguntarHoras(p){
   S.preguntadas = S.preguntadas || {};
   const limite = sumaDias(iso(new Date()), 45);
@@ -1475,8 +1475,8 @@ function preguntarHoras(p){
 
 /* ---------- acciones de vínculo ---------- */
 function dlgVinculo(){
-  abrirDlg('<h2>Vincular con WorkOut</h2><p class="sub" style="margin-bottom:14px">Escribe el correo con el que el paciente entra en WorkOut. Recibirá una solicitud al entrar en esta app y decidirá si la acepta.</p>' +
-    '<div class="field"><label class="f" for="v_email">Correo del paciente</label><input id="v_email" type="email" inputmode="email" autocomplete="off"></div>' +
+  abrirDlg('<h2>Vincular con WorkOut</h2><p class="sub" style="margin-bottom:14px">Escribe el correo con el que el usuario entra en WorkOut. Recibirá una solicitud al entrar en esta app y decidirá si la acepta.</p>' +
+    '<div class="field"><label class="f" for="v_email">Correo del usuario</label><input id="v_email" type="email" inputmode="email" autocomplete="off"></div>' +
     '<div class="msg err" id="v_msg"></div>' +
     '<div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn" data-act="guardarVinculo">Enviar solicitud</button></div>');
 }
