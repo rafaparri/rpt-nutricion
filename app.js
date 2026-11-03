@@ -545,7 +545,7 @@ function vMenu(p){
     return '<div class="card"><h3 style="margin-bottom:2px">'+d+' · '+NIVELES[S.levels[i]-1]+'</h3>' +
       '<p class="sub" style="margin-bottom:8px">Total '+Math.round(tot.kcal)+' de '+(obj ? obj.kcal : '?')+' kcal · P '+Math.round(tot.prot)+'/'+(obj ? obj.prot : '?')+' · C '+Math.round(tot.carb)+'/'+(obj ? obj.carb : '?')+' · G '+Math.round(tot.fat)+'/'+(obj ? obj.fat : '?')+'</p>' +
       (hayReal(dia) ? (() => { const rt = totalReal(dia); return '<p class="sub" style="margin:-4px 0 8px;color:var(--t-accent2);font-weight:700">Real: '+Math.round(rt.kcal)+' kcal · P '+Math.round(rt.prot)+' · C '+Math.round(rt.carb)+' · G '+Math.round(rt.fat)+' ('+txtVariacion(tot, rt)+')</p>'; })() : '') +
-      '<div class="list">'+filas+'</div></div>';
+      '<div class="list">'+filas+'</div><button class="btn secondary" style="margin-top:10px" data-act="addExtra" data-d="'+i+'">＋ Añadir un plato adicional</button></div>';
   }).join('');
   return html + btnGen;
 }
@@ -553,7 +553,7 @@ function dlgSlot(){
   const p = pacienteActual(), sl = S.slot; if (!p || !sl) return;
   const dia = S.menu[sl.d], m = dia.meals[sl.m], obj = objetivoDia(p, sl.d);
   const pct = (repartoDe(p).find(x => x[0] === m.slot) || [0,0])[1];
-  const t = obj ? {kcal:obj.kcal*pct/100, prot:obj.prot*pct/100, carb:obj.carb*pct/100, fat:obj.fat*pct/100} : null;
+  const t = obj && !m.extra ? {kcal:obj.kcal*pct/100, prot:obj.prot*pct/100, carb:obj.carb*pct/100, fat:obj.fat*pct/100} : null;
   const usos = {}; S.menu.forEach(d => (d.meals||[]).forEach(x => { if (x.rid) usos[x.rid] = (usos[x.rid]||0) + 1; }));
   const delDia = {}; dia.meals.forEach(x => { if (x.rid && x !== m) delDia[x.rid] = true; });
   const q = norm(S.slotQ || '');
@@ -566,8 +566,8 @@ function dlgSlot(){
     const v = valsComida(m);
     actual = '<div class="card accent" style="margin-bottom:12px"><b>'+esc(m.name)+'</b><p class="sub" style="margin:4px 0 10px">'+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+'</p>' +
       '<div class="btn-row"><button class="btn secondary" data-act="escalaSlot" data-n="-0.1" aria-label="Menos ración">− Ración</button><b style="align-self:center;text-align:center;min-width:64px">×'+kgTxt(Math.round(m.s*100)/100)+'</b><button class="btn secondary" data-act="escalaSlot" data-n="0.1" aria-label="Más ración">＋ Ración</button></div>' +
-      '<button class="btn danger" style="margin-top:10px" data-act="quitarSlot">Quitar esta comida</button></div>';
-  }
+      '<button class="btn danger" style="margin-top:10px" data-act="quitarSlot">'+(m.extra ? 'Eliminar este plato adicional' : 'Quitar esta comida')+'</button></div>';
+  } else if (m.extra) actual = '<button class="btn danger" style="margin-bottom:12px" data-act="quitarSlot">Eliminar este plato adicional</button>';
   const buscador = '<div class="field"><label class="f" for="sq">Buscar receta</label><input id="sq" type="search" value="'+esc(S.slotQ||'')+'" placeholder="Nombre o ingrediente…" autocomplete="off"></div>';
   const sinKcal = S.recipes.filter(r => !(r.kcal > 0)).length;
   const lista = buscador + '<button class="btn secondary" style="margin-bottom:10px" data-act="recetaDesdeSlot">＋ Añadir receta a mano</button>' +
@@ -577,6 +577,25 @@ function dlgSlot(){
   }).join('') + '</div>' : '<div class="empty">'+(q ? 'Ninguna receta coincide.' : 'No hay recetas para esta comida. Añade recetas en el Recetario.')+'</div>');
   const botonReal = m.rid ? '<button class="btn secondary" style="margin-bottom:12px" data-act="realDlg">🔁 Cambio sobre la marcha'+(m.real ? ' (registrado)' : '')+'</button>' : '';
   abrirDlg(cabecera + actual + botonReal + lista + '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
+}
+async function addExtra(d){
+  const dia = S.menu[d]; if (!dia) return;
+  dia.meals = dia.meals || [];
+  const usados = dia.meals.map(m => m.slot);
+  let n = 1, nombre = 'Adicional'; while (usados.indexOf(nombre) >= 0) { n++; nombre = 'Adicional '+n; }
+  dia.meals.push({slot:nombre, rid:null, extra:true});
+  S.slotQ = ''; S.slot = {d, m:dia.meals.length - 1};
+  render(); dlgSlot();
+  await guardarMenu();
+}
+async function quitarExtra(){
+  const sl = S.slot; if (!sl) return;
+  const dia = S.menu[sl.d], m = dia.meals[sl.m], antes = totalDia(dia);
+  dia.meals.splice(sl.m, 1);
+  const des = totalDia(dia);
+  cerrarDlg(); S.slotQ = '';
+  setMsg('Plato adicional eliminado. '+DIAS[sl.d]+' queda en '+fmtN(des.kcal)+' kcal.', true);
+  render(); await guardarMenu();
 }
 async function cambiarSlot(fn, cerrar, aviso, reabrir){
   const sl = S.slot; if (!sl) return;
@@ -927,6 +946,7 @@ function tablaMenuApp(p){
     const v = valsComida(m);
     return '<td class="cel" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'" tabindex="0" role="button"><b>'+esc(m.name)+'</b>'+(m.fija ? ' 📌' : '')+(m.real ? ' 🔁' : '')+'<br><span class="mut">×'+kgTxt(Math.round(m.s*100)/100)+' · '+Math.round(v.kcal)+' kcal</span><br><span class="mut">P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</span></td>'; };
   const filas = slots.map(sl => '<tr><th class="sl">'+esc(sl)+'</th>'+DIAS.map((d, i) => celda(i, sl)).join('')+'</tr>').join('');
+  const filaExtra = '<tr><th class="sl">Plato adicional</th>'+DIAS.map((d, i) => S.menu[i] && S.menu[i].meals && S.menu[i].meals.length ? '<td class="cel" data-act="addExtra" data-d="'+i+'" tabindex="0" role="button"><span class="mut">＋ añadir</span></td>' : '<td></td>').join('')+'</tr>';
   const tot = '<tr class="tot"><th class="sl">Total del día</th>'+DIAS.map((d, i) => {
     const dia = S.menu[i], o = objetivoDia(p, i); if (!dia || !dia.meals || !dia.meals.some(m => m.rid)) return '<td class="mut">–</td>';
     const t = totalDia(dia), b = S.menuBase && S.menuBase[i];
@@ -934,7 +954,7 @@ function tablaMenuApp(p){
     const dif = b ? Math.abs(t.kcal - b.kcal) + Math.abs(t.prot - b.prot) + Math.abs(t.carb - b.carb) + Math.abs(t.fat - b.fat) : 0;
     return '<td><b style="color:'+col+'">'+fmtN(t.kcal)+' kcal</b>'+(o ? ' <span class="mut">('+Math.round(pct*100)+'%)</span>' : '')+'<br><span class="mut">obj. '+(o ? o.kcal : '?')+'</span><br><span class="mut">P '+Math.round(t.prot)+(o ? '/'+o.prot : '')+'<br>C '+Math.round(t.carb)+(o ? '/'+o.carb : '')+'<br>G '+Math.round(t.fat)+(o ? '/'+o.fat : '')+'</span>' +
       (dif > 4 ? '<br><span class="chg">Desde el menú generado:<br>'+txtVariacion(b, t)+'</span>' : '') + '</td>'; }).join('')+'</tr>';
-  return '<div class="tscroll"><table class="mtabapp"><thead><tr><th class="sl"></th>'+cab+'</tr></thead><tbody>'+filas+tot+'</tbody></table></div>';
+  return '<div class="tscroll"><table class="mtabapp"><thead><tr><th class="sl"></th>'+cab+'</tr></thead><tbody>'+filas+filaExtra+tot+'</tbody></table></div>';
 }
 function vCompraTab(p){
   const c = vCompra(false);
@@ -1352,7 +1372,7 @@ function asignarASlot(rid){
   const r = recetaPorId(rid), p = pacienteActual(), sl = S.slot; if (!r || !p || !sl) { cerrarDlg(); render(); return; }
   const m0 = S.menu[sl.d].meals[sl.m];
   const pct = (repartoDe(p).find(x => x[0] === m0.slot) || [0,0])[1], obj = objetivoDia(p, sl.d);
-  const s = obj && r.kcal > 0 ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
+  const s = obj && r.kcal > 0 && !m0.extra ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
   cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s), {fija:false}), true, DIAS[sl.d]+' · '+m0.slot+': añadida y puesta «'+r.name+'». Ya está también en tu Recetario.');
 }
 function siguienteDeCola(){
@@ -1610,10 +1630,11 @@ document.addEventListener('click', e => {
     case 'guardarReparto': guardarReparto(); break;
     case 'slotMenu': S.slotQ = ''; S.slot = {d:parseInt(t.dataset.d,10), m:parseInt(t.dataset.m,10)}; dlgSlot(); break;
     case 'escalaSlot': cambiarSlot(m => { m.s = Math.round(clamp(m.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }); break;
-    case 'quitarSlot': cambiarSlot(m => { m.rid = null; delete m.name; }, true, 'Comida quitada.'); break;
+    case 'quitarSlot': if (S.menu[S.slot.d].meals[S.slot.m].extra) quitarExtra(); else cambiarSlot(m => { m.rid = null; delete m.name; }, true, 'Comida quitada.'); break;
+    case 'addExtra': addExtra(parseInt(t.dataset.d, 10)); break;
     case 'elegirReceta': { const r = recetaPorId(t.dataset.id); if (r) { const p = pacienteActual(); const sl = S.slot; const m0 = S.menu[sl.d].meals[sl.m];
         const pct = (repartoDe(p).find(x => x[0] === m0.slot) || [0,0])[1], obj = objetivoDia(p, sl.d);
-        const s = obj ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
+        const s = obj && !m0.extra ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
         cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s), {fija:false}), true, DIAS[sl.d]+' · '+m0.slot+': cambiado a '+r.name+'.'); } break; }
     case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
     case 'verReceta': dlgVerReceta(t.dataset.id); break;
