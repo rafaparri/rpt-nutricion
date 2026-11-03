@@ -34,7 +34,7 @@ const EXTRA_FOODS = {
   "queso feta": [264,14,4,21,30], "feta": [264,14,4,21,30], "queso rallado": [330,24,1,25,10], "mozzarella": [280,22,2,20,30],
   "queso curado": [400,28,1,32,20], "queso anejo": [400,28,1,32,20],
   "macarron": [350,12,71,1.5,100], "macarrones": [350,12,71,1.5,100], "espagueti": [350,12,71,1.5,100], "spaghetti": [350,12,71,1.5,100],
-  "margarina": [720,0.2,0.5,80,10], "fuet": [450,26,2,38,10], "castana": [165,2,36,1.5,15],
+  "margarina": [720,0.2,0.5,80,10], "fuet": [421,27.5,1.4,34,10], "espetec": [421,27.5,1.4,34,10], "castana": [165,2,36,1.5,15],
   "base de pizza": [270,8.6,49.5,4.2,200], "nata agria": [200,3,4,19,15], "sour cream": [200,3,4,19,15], "banana": [89,1.1,23,0.3,120], "tomate frito": [80,1.5,10,4,30], "judia verde": [31,1.8,7,0.2,100]
 };
 Object.keys(EXTRA_FOODS).forEach(k => { if (!D.FOOD_DB[k]) D.FOOD_DB[k] = EXTRA_FOODS[k]; });
