@@ -1293,7 +1293,10 @@ function dlgFormReceta(r, pendientes){
   if (r.declarado) decl = '<div class="notice ok" style="margin-bottom:12px">Los macros vienen declarados en el propio documento (la ficha no tiene ingredientes que calcular).</div>';
   else if (r.declaradoWord && r.declaradoWord.kcal && Math.abs(r.declaradoWord.kcal - (r.kcal||0)) > Math.max(40, 0.1*r.declaradoWord.kcal))
     decl = '<div class="notice" style="margin-bottom:12px">El Word decía <b>'+Math.round(r.declaradoWord.kcal)+' kcal</b> (P '+esc(String(r.declaradoWord.prot).replace('.',','))+' · C '+esc(String(r.declaradoWord.carb).replace('.',','))+' · G '+esc(String(r.declaradoWord.grasa).replace('.',','))+'). La app ha calculado <b>'+Math.round(r.kcal||0)+' kcal</b> con los ingredientes. Revisa las cantidades.</div>';
-  abrirDlg('<h2>'+(r.id ? 'Editar receta' : 'Receta')+'</h2>' + falta + decl + no +
+  const base = (!r.id && !r.name && !pendientes && S.recipes.length)
+    ? '<div class="field"><label class="f" for="r_base">Partir de una receta ya existente (opcional)</label><select id="r_base"><option value="">— empezar en blanco —</option>' +
+      S.recipes.slice().sort((x, y) => (x.name||'').localeCompare(y.name||'', 'es')).map(x => '<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>').join('') + '</select></div>' : '';
+  abrirDlg('<h2>'+(r.id ? 'Editar receta' : 'Receta')+'</h2>' + falta + decl + no + base +
     '<div class="field"><label class="f" for="r_name">Nombre</label><input id="r_name" value="'+esc(r.name||'')+'" autocomplete="off"></div>' +
     '<div class="grid2"><div class="field"><label class="f" for="r_serv">Raciones</label><input id="r_serv" inputmode="numeric" value="'+esc(r.servings||4)+'"></div>' +
     '<div class="field"><label class="f" for="r_use">Utilizar en</label><input id="r_use" value="'+esc(r.useIn||'Almuerzo, Cena')+'"></div></div>' +
@@ -1642,6 +1645,15 @@ document.addEventListener('input', e => {
   if (e.target && e.target.id === 'rq2') { S.realQ = e.target.value; dlgReal(); const n = $('#rq2'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
   if (e.target && e.target.id === 'sq') { S.slotQ = e.target.value; dlgSlot(); const n = $('#sq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; } if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
 document.addEventListener('change', e => {
+  if (e.target && e.target.id === 'r_base') {
+    const o = recetaPorId(e.target.value); if (!o) return;
+    const put = (id, v) => { const el = $('#'+id); if (el) el.value = v; };
+    put('r_name', (o.name||'') + ' (copia)'); put('r_serv', o.servings||4); put('r_use', o.useIn||'Almuerzo, Cena');
+    put('r_ing', (o.ingredients||[]).join('\n')); put('r_prep', o.prep||'');
+    put('r_kcal', o.kcal||0); put('r_w', o.weight||0); put('r_p', kgTxt(o.prot||0)); put('r_c', kgTxt(o.carb||0)); put('r_g', kgTxt(o.fat||0));
+    const m = $('#r_msg'); if (m) { m.className = 'msg ok'; m.textContent = 'Copiada de «'+o.name+'». Cambia lo que quieras y guarda.'; }
+    return;
+  }
   if (e.target && e.target.id === 'docxIn' && e.target.files.length) { importarDocx(e.target.files); e.target.value = ''; return; } if (e.target && e.target.id === 'woplan') S.woPlanId = e.target.value; });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && S.view === 'login' && e.target.id === 'pw') entrar(false); });
 
