@@ -1289,7 +1289,10 @@ function dlgFormReceta(r, pendientes){
   r = r || {};
   const falta = pendientes > 0 ? '<div class="notice" style="margin-bottom:12px">📄 Receta leída del Word. Revísala. Quedan '+pendientes+' más después de esta.</div>' : '';
   const no = (r.unrecognized && r.unrecognized.length) ? '<div class="notice" style="margin-bottom:12px">No se han reconocido para el cálculo: '+esc(r.unrecognized.join(', '))+'. Corrige los macros a mano si hace falta.</div>' : '';
-  const decl = r.declarado ? '<div class="notice ok" style="margin-bottom:12px">Los macros vienen declarados en el propio documento.</div>' : '';
+  let decl = '';
+  if (r.declarado) decl = '<div class="notice ok" style="margin-bottom:12px">Los macros vienen declarados en el propio documento (la ficha no tiene ingredientes que calcular).</div>';
+  else if (r.declaradoWord && r.declaradoWord.kcal && Math.abs(r.declaradoWord.kcal - (r.kcal||0)) > Math.max(40, 0.1*r.declaradoWord.kcal))
+    decl = '<div class="notice" style="margin-bottom:12px">El Word decía <b>'+Math.round(r.declaradoWord.kcal)+' kcal</b> (P '+esc(String(r.declaradoWord.prot).replace('.',','))+' · C '+esc(String(r.declaradoWord.carb).replace('.',','))+' · G '+esc(String(r.declaradoWord.grasa).replace('.',','))+'). La app ha calculado <b>'+Math.round(r.kcal||0)+' kcal</b> con los ingredientes. Revisa las cantidades.</div>';
   abrirDlg('<h2>'+(r.id ? 'Editar receta' : 'Receta')+'</h2>' + falta + decl + no +
     '<div class="field"><label class="f" for="r_name">Nombre</label><input id="r_name" value="'+esc(r.name||'')+'" autocomplete="off"></div>' +
     '<div class="grid2"><div class="field"><label class="f" for="r_serv">Raciones</label><input id="r_serv" inputmode="numeric" value="'+esc(r.servings||4)+'"></div>' +

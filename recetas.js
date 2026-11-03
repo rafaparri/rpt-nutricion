@@ -362,11 +362,13 @@ function recetaDeLineas(parrafos){
   const d = parseLineas(parrafos);
   let est;
   try { est = estimarMacros(d.ingredientes, d.raciones); } catch (e) { est = { kcal: 0, prot: 0, carb: 0, grasa: 0, peso: 0, noReconocidos: [] }; }
-  const dec = d.declarados || {}, usaDecl = ['kcal', 'prot', 'carb', 'grasa'].every(k => k in dec);
+  const dec = d.declarados || {}, tieneDecl = ['kcal', 'prot', 'carb', 'grasa'].every(k => k in dec);
+  // Se calcula siempre con los ingredientes. Los macros escritos en el Word solo se usan si no hay nada que calcular.
+  const usaDecl = tieneDecl && (d.ingredientes.length === 0 || !(est.kcal > 0));
   const kcal = usaDecl ? dec.kcal : est.kcal, prot = usaDecl ? dec.prot : est.prot, carb = usaDecl ? dec.carb : est.carb, grasa = usaDecl ? dec.grasa : est.grasa;
   return { name: d.nombre || 'Plato sin nombre', servings: d.raciones, ingredients: d.ingredientes, prep: d.preparacion, useIn: d.utilizarEn,
            kcal: Math.round(kcal) || 0, prot: prot || 0, carb: carb || 0, fat: grasa || 0, weight: est.peso || 0,
-           category: categorizar(kcal, prot, carb, grasa), unrecognized: est.noReconocidos, sinIngredientes: d.ingredientes.length === 0, declarado: usaDecl };
+           category: categorizar(kcal, prot, carb, grasa), unrecognized: est.noReconocidos, sinIngredientes: d.ingredientes.length === 0, declarado: usaDecl, declaradoWord: tieneDecl ? { kcal: dec.kcal, prot: dec.prot, carb: dec.carb, grasa: dec.grasa } : null };
 }
 
 async function leerDocx(arrayBuffer){
