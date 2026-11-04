@@ -39,6 +39,11 @@ const S = {
 };
 const refPac = pid => db.collection('nu_patients').doc(pid);
 try { S.side = window.innerWidth >= 900 && localStorage.getItem('nu_side') !== '0'; } catch(e){ S.side = window.innerWidth >= 900; }
+/* Espacio de trabajo: el titular y las personas con acceso completo comparten usuarios, recetas y menús. */
+const miEmail = () => ((S.user && S.user.email) || '').toLowerCase();
+const wsUid = () => S.wsOwner || S.user.uid;
+const esMiembro = () => !!S.wsOwner && S.wsOwner !== S.user.uid;
+const wsTeam = () => esMiembro() ? (S.wsTeamList || []) : (S.team || []);
 const pacienteActual = () => S.patients.find(p => p.id === S.pid);
 
 /* ---------- vínculo con WorkOut ---------- */
@@ -707,7 +712,7 @@ async function guardarFijas(todos){
   });
   try {
     if (todos) {
-      await db.collection('users').doc(S.user.uid).update({nuPrefs:Object.assign({}, S.prefs, {fijas})});
+      await db.collection('users').doc(wsUid()).update({nuPrefs:Object.assign({}, S.prefs, {fijas})});
       S.prefs = Object.assign({}, S.prefs, {fijas});
       await refPac(p.id).update({fijas:firebase.firestore.FieldValue.delete()}); delete p.fijas;
     } else { await refPac(p.id).update({fijas}); p.fijas = fijas; }
@@ -1089,12 +1094,42 @@ function vRecetario(){
     (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar recetas… ('+S.recipes.length+')</button>' : '') +
     '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
 }
+async function equipoCambiar(email, alta){
+  email = (email || '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { S.tmsg = 'Escribe un correo válido.'; S.tmsgOk = false; render(); return; }
+  if (email === miEmail()) { S.tmsg = 'Ese es tu propio correo.'; S.tmsgOk = false; render(); return; }
+  if (alta && (S.team || []).indexOf(email) >= 0) { S.tmsg = 'Ese correo ya tiene acceso.'; S.tmsgOk = false; render(); return; }
+  const fv = firebase.firestore.FieldValue, lista = alta ? (S.team || []).concat([email]) : (S.team || []).filter(x => x !== email);
+  S.tmsg = alta ? 'Dando acceso…' : 'Quitando acceso…'; S.tmsgOk = true; render();
+  try {
+    await db.collection('users').doc(S.user.uid).set({nuTeam:lista}, {merge:true});
+    for (const col of ['nu_patients', 'nu_recipes']) {
+      const snap = await db.collection(col).where('ownerUid','==',S.user.uid).get();
+      for (let i = 0; i < snap.docs.length; i += 400) {
+        const b = db.batch(); snap.docs.slice(i, i+400).forEach(d => b.update(d.ref, {teamEmails: alta ? fv.arrayUnion(email) : fv.arrayRemove(email)})); await b.commit();
+      }
+    }
+    S.team = lista;
+    S.tmsg = alta ? email+' ya tiene acceso completo. Debe entrar con ese correo y pulsar «Activar modo nutricionista».' : 'Acceso retirado a '+email+'.'; S.tmsgOk = true;
+  } catch(e){ S.tmsg = 'No se pudo cambiar ('+((e && (e.code||e.message)) || 'error')+'). Comprueba que has publicado las reglas nuevas de Firebase.'; S.tmsgOk = false; }
+  render();
+}
+function equipoHtml(){
+  if (S.view !== 'app') return '';
+  if (esMiembro()) return '<div class="card"><h3>Acceso compartido</h3><p class="sub">Trabajas con los usuarios, recetas y menús de <b>'+esc(S.wsOwnerName||'el titular')+'</b>, con todos los permisos.</p></div>';
+  return '<div class="card"><h3>Acceso completo para otras personas</h3><p class="sub" style="margin-bottom:10px">Quien añadas aquí verá y podrá cambiar tus usuarios, recetas y menús entrando con su propio correo. Tendrá que pulsar «Activar modo nutricionista» la primera vez.</p>' +
+    (S.team || []).map(e => '<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><b style="flex:1;word-break:break-all">'+esc(e)+'</b><button class="btn secondary small" data-act="equipoQuitar" data-e="'+esc(e)+'">Quitar</button></div>').join('') +
+    '<div class="field"><label class="f" for="eq_mail">Correo de la persona</label><input id="eq_mail" type="email" inputmode="email" autocomplete="off" placeholder="nombre@correo.com"></div>' +
+    (S.tmsg ? '<div class="msg '+(S.tmsgOk ? 'ok' : 'err')+'">'+esc(S.tmsg)+'</div>' : '') +
+    '<button class="btn secondary" data-act="equipoAnadir">＋ Dar acceso completo</button></div>';
+}
 function vCuenta(){
   return '<div class="crumbs"><b>Cuenta</b></div><div class="content"><h1>Cuenta</h1>' +
     '<div class="card"><p class="sub">Sesión iniciada como</p><b>'+esc(S.user.email)+'</b></div>' +
     S.requests.filter(l => l.status === 'accepted').map(l =>
       '<div class="card"><p class="sub">'+esc(l.nutriName||'Un nutricionista')+' puede leer tus datos de WorkOut y anotarte pesos.</p>' +
       '<button class="btn danger" style="margin-top:10px" data-act="retirar" data-id="'+esc(l.id)+'">Retirar permiso</button></div>').join('') +
+    equipoHtml() +
     '<div class="card"><p class="sub">Versión '+esc(versionTexto())+'</p><button class="btn secondary" style="margin-top:10px" data-act="recargar">🔄 Recargar app</button></div>' +
     '<button class="btn danger" data-act="salir">Salir</button></div>';
 }
@@ -1214,9 +1249,17 @@ function vCalCard(p){
 }
 /* ---------- datos ---------- */
 async function cargarPacientes(){
-  const snap = await db.collection('nu_patients').where('ownerUid','==',S.user.uid).get();
-  S.patients = snap.docs.map(d => Object.assign({id:d.id}, d.data()))
-    .sort((a,b) => String(a.name||'').localeCompare(String(b.name||''),'es'));
+  const propios = await db.collection('nu_patients').where('ownerUid','==',S.user.uid).get();
+  let compart = {docs:[]};
+  try { compart = await db.collection('nu_patients').where('teamEmails','array-contains',miEmail()).get(); } catch(e){ console.error('equipo', e); }
+  const mapa = {}; propios.docs.concat(compart.docs).forEach(d => { mapa[d.id] = Object.assign({id:d.id}, d.data()); });
+  const ajeno = compart.docs.find(d => d.data().ownerUid && d.data().ownerUid !== S.user.uid);
+  S.wsOwner = ajeno ? ajeno.data().ownerUid : S.user.uid;
+  S.patients = Object.keys(mapa).map(k => mapa[k]).sort((a,b) => String(a.name||'').localeCompare(String(b.name||''),'es'));
+  if (esMiembro()) {
+    try { const od = await db.collection('users').doc(S.wsOwner).get(); const o = od.exists ? od.data() : {}; S.prefs = o.nuPrefs || {}; S.wsTeamList = Array.isArray(o.nuTeam) ? o.nuTeam : []; S.wsOwnerName = o.name || o.email || 'el titular'; }
+    catch(e){ console.error('titular', e); S.wsTeamList = [miEmail()]; S.wsOwnerName = 'el titular'; }
+  }
 }
 async function cargarLinks(){
   const snap = await db.collection('nu_links').where('ownerUid','==',S.user.uid).get();
@@ -1289,7 +1332,7 @@ async function guardarPaciente(id){
   const datos = { name, sex:g('d_sex'), birthYear:y, heightCm:h, goal:g('d_goal'), goalType:g('d_gt'), notes:g('d_notes'), targetKg:tk, rateKg:rt, dominant:g('d_dom') };
   try {
     if (id) await refPac(id).update(datos);
-    else await db.collection('nu_patients').add(Object.assign({ownerUid:S.user.uid, linkedUid:null, createdAt:firebase.firestore.FieldValue.serverTimestamp()}, datos));
+    else await db.collection('nu_patients').add(Object.assign({ownerUid:wsUid(), teamEmails:wsTeam(), linkedUid:null, createdAt:firebase.firestore.FieldValue.serverTimestamp()}, datos));
     cerrarDlg(); await cargarPacientes(); render();
   } catch(e){ $('#d_msg').textContent = 'No se pudo guardar. Inténtalo de nuevo.'; }
 }
@@ -1346,17 +1389,20 @@ async function borrarSeguro(){
 const porNombre = (a,b) => String(a.name||'').localeCompare(String(b.name||''),'es');
 async function cargarRecetas(){
   const m = await db.collection('nu_recipes').where('ownerUid','==',S.user.uid).get();
-  S.recipes = m.docs.map(d => Object.assign({id:d.id}, d.data())).sort(porNombre);
+  let mt = {docs:[]};
+  try { mt = await db.collection('nu_recipes').where('teamEmails','array-contains',miEmail()).get(); } catch(e){ console.error('equipo recetas', e); }
+  const mapa = {}; m.docs.concat(mt.docs).forEach(d => { mapa[d.id] = Object.assign({id:d.id}, d.data()); });
+  S.recipes = Object.keys(mapa).map(k => mapa[k]).sort(porNombre);
   try {
     const c = await db.collection('nu_recipes').where('shared','==',true).get();
-    S.sharedRecipes = c.docs.map(d => Object.assign({id:d.id}, d.data())).filter(r => r.ownerUid !== S.user.uid).sort(porNombre);
+    S.sharedRecipes = c.docs.map(d => Object.assign({id:d.id}, d.data())).filter(r => r.ownerUid !== S.user.uid && r.ownerUid !== wsUid() && !S.recipes.some(x => x.id === r.id)).sort(porNombre);
   } catch(e){ S.sharedRecipes = []; console.error('compartidas', e); }
 }
 function setRmsg(t, ok){ S.rmsg = t; S.rmsgOk = !!ok; }
 const recetaPorId = id => S.recipes.concat(S.sharedRecipes).find(r => r.id === id);
 function dlgVerReceta(id){
   const r = recetaPorId(id); if (!r) return;
-  const mia = r.ownerUid === S.user.uid;
+  const mia = r.ownerUid === S.user.uid || r.ownerUid === wsUid();
   abrirDlg('<h2>'+esc(r.name)+'</h2>' +
     '<p class="sub" style="margin-bottom:6px">'+esc(macrosTxt(r))+' por ración</p>' +
     '<p class="sub" style="margin-bottom:12px">'+(r.servings ? r.servings+' raciones · ' : '')+(r.weight ? 'ración de '+r.weight+' g · ' : '')+esc([r.category, r.useIn].filter(Boolean).join(' · '))+(mia ? '' : ' · de '+esc(r.ownerName||'otro nutricionista'))+'</p>' +
@@ -1451,7 +1497,7 @@ async function guardarReceta(id){
   try {
     let nuevoId = null;
     if (id) await db.collection('nu_recipes').doc(id).update(datos);
-    else nuevoId = (await db.collection('nu_recipes').add(Object.assign({ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now(), origen:(S.formReceta && S.formReceta.origen) === 'importada' ? 'importada' : 'manual'}, datos))).id;
+    else nuevoId = (await db.collection('nu_recipes').add(Object.assign({ownerUid:wsUid(), teamEmails:wsTeam(), ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now(), origen:(S.formReceta && S.formReceta.origen) === 'importada' ? 'importada' : 'manual'}, datos))).id;
     await cargarRecetas();
     if (nuevoId && S.slotPend) { const sp = S.slotPend; S.slotPend = null; S.slot = sp; asignarASlot(nuevoId); return; }
   } catch(e){ $('#r_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
@@ -1488,7 +1534,7 @@ async function compartirReceta(id){
 async function copiarReceta(id){
   const r = recetaPorId(id); if (!r) return;
   const c = Object.assign({}, r); delete c.id;
-  Object.assign(c, {ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], shared:false, origen:'manual', copiedFrom:r.ownerUid, createdMs:Date.now(), updatedMs:Date.now()});
+  Object.assign(c, {ownerUid:wsUid(), teamEmails:wsTeam(), ownerName:S.user.displayName || (S.user.email||'').split('@')[0], shared:false, origen:'manual', copiedFrom:r.ownerUid, createdMs:Date.now(), updatedMs:Date.now()});
   try { await db.collection('nu_recipes').add(c); await cargarRecetas(); }
   catch(e){ $('#r_msg').textContent = 'No se pudo copiar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
   cerrarDlg(); S.rtab = 'mias'; setRmsg('Copiada a tus recetas.', true); render();
@@ -1743,6 +1789,8 @@ document.addEventListener('click', e => {
         const pct = (repartoDe(p).find(x => x[0] === m0.slot) || [0,0])[1], obj = objetivoDia(p, sl.d);
         const s = obj && !m0.extra ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
         cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s), {fija:false}), true, DIAS[sl.d]+' · '+m0.slot+': cambiado a '+r.name+'.'); } break; }
+    case 'equipoAnadir': equipoCambiar($('#eq_mail') ? $('#eq_mail').value : '', true); break;
+    case 'equipoQuitar': equipoCambiar(t.dataset.e, false); break;
     case 'rgrp': S.rgrp = t.dataset.v; render(); break;
     case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
     case 'verReceta': dlgVerReceta(t.dataset.id); break;
@@ -1812,12 +1860,12 @@ auth.onAuthStateChanged(async u => {
     // Ficha básica (nombre/correo); si ya existe por WorkOut no se toca.
     const ur = db.collection('users').doc(u.uid);
     const ud = await ur.get();
-    S.prefs = (ud.exists && ud.data().nuPrefs) || {};
+    S.prefs = (ud.exists && ud.data().nuPrefs) || {}; S.team = (ud.exists && Array.isArray(ud.data().nuTeam)) ? ud.data().nuTeam : []; S.wsOwner = null; S.wsTeamList = null;
     if (!ud.exists) await ur.set({email:u.email, name:u.displayName || (u.email||'').split('@')[0], createdAt:Date.now()});
     const g = await ur.collection('roleGrants').doc('nutritionist').get();
     S.isNutri = g.exists;
     try { await cargarSolicitudes(); } catch(e){ S.requests = []; }
-    if (S.isNutri) { try { await cargarRecetas(); } catch(e){ S.recipes = []; console.error('recetas', e); } await cargarPacientes(); try { await cargarLinks(); } catch(e){ S.links = []; } S.view = 'app'; S.tab = 'pacientes'; }
+    if (S.isNutri) { await cargarPacientes(); try { await cargarRecetas(); } catch(e){ S.recipes = []; console.error('recetas', e); } try { await cargarLinks(); } catch(e){ S.links = []; } S.view = 'app'; S.tab = 'pacientes'; }
     else S.view = 'activar';
   } catch(e){ S.view = 'activar'; setMsg('No se pudieron leer tus datos. Comprueba la conexión.', false); }
   render();
