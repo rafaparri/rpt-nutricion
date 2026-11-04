@@ -80,6 +80,12 @@ function compsDeLaSemana(pid){
   const fin = sumaDias(S.weekStart, 6);
   return w.comps.map(c => ({c, d:c.day || c.startDate})).filter(x => x.d && x.d >= S.weekStart && x.d <= fin);
 }
+function buscaSolicHtml(){
+  if (S.requests.some(l => l.status === 'pending')) return '';
+  return '<div class="card"><h3>Solicitudes de vinculación con WorkOut</h3><p class="sub" style="margin-bottom:10px">Has entrado como <b>'+esc(miEmail())+'</b>. '+
+    (S.reqErr ? 'No se pudieron leer las solicitudes ('+esc(S.reqErr)+').' : 'No hay ninguna solicitud pendiente para este correo.')+' Si esperabas una, comprueba que el correo es exactamente el que escribió quien te la envió.</p>' +
+    '<button class="btn secondary" data-act="buscarSolic">🔄 Buscar solicitudes de nuevo</button></div>';
+}
 function solicitudesHtml(){
   return S.requests.filter(l => l.status === 'pending').map(l =>
     '<div class="card accent"><h3>Solicitud de '+esc(l.nutriName||'tu nutricionista')+'</h3>' +
@@ -121,7 +127,7 @@ function vLogin(){
 }
 function vActivar(){
   return '<div class="app">'+topBar()+'<div class="content">' +
-    '<h1>Bienvenido</h1>' + solicitudesHtml() +
+    '<h1>Bienvenido</h1>' + solicitudesHtml() + buscaSolicHtml() +
     '<div class="card"><h3>Soy nutricionista</h3><p class="sub" style="margin-bottom:14px">Podrás crear tus usuarios, marcar su semana de entreno y preparar sus menús.</p>' +
     '<button class="btn" data-act="activar">Activar modo nutricionista</button></div>' +
     '<div class="card"><h3>Soy usuario</h3><p class="sub">Tu nutricionista te dará acceso con tu correo. Cuando lo haga, tu menú aparecerá aquí.</p></div>' +
@@ -1129,7 +1135,7 @@ function vCuenta(){
     S.requests.filter(l => l.status === 'accepted').map(l =>
       '<div class="card"><p class="sub">'+esc(l.nutriName||'Un nutricionista')+' puede leer tus datos de WorkOut y anotarte pesos.</p>' +
       '<button class="btn danger" style="margin-top:10px" data-act="retirar" data-id="'+esc(l.id)+'">Retirar permiso</button></div>').join('') +
-    equipoHtml() +
+    solicitudesHtml() + buscaSolicHtml() + equipoHtml() +
     '<div class="card"><p class="sub">Versión '+esc(versionTexto())+'</p><button class="btn secondary" style="margin-top:10px" data-act="recargar">🔄 Recargar app</button></div>' +
     '<button class="btn danger" data-act="salir">Salir</button></div>';
 }
@@ -1266,8 +1272,11 @@ async function cargarLinks(){
   S.links = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
 }
 async function cargarSolicitudes(){
-  const snap = await db.collection('nu_links').where('email','==',(S.user.email||'').toLowerCase()).get();
-  S.requests = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
+  S.reqErr = null;
+  try {
+    const snap = await db.collection('nu_links').where('email','==',(S.user.email||'').toLowerCase()).get();
+    S.requests = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
+  } catch(e){ S.requests = []; S.reqErr = (e && (e.code||e.message)) || 'error'; }
 }
 async function leerWorkOut(pid){
   const l = linkDe(pid);
@@ -1789,6 +1798,7 @@ document.addEventListener('click', e => {
         const pct = (repartoDe(p).find(x => x[0] === m0.slot) || [0,0])[1], obj = objetivoDia(p, sl.d);
         const s = obj && !m0.extra ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
         cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s), {fija:false}), true, DIAS[sl.d]+' · '+m0.slot+': cambiado a '+r.name+'.'); } break; }
+    case 'buscarSolic': cargarSolicitudes().then(render); break;
     case 'equipoAnadir': equipoCambiar($('#eq_mail') ? $('#eq_mail').value : '', true); break;
     case 'equipoQuitar': equipoCambiar(t.dataset.e, false); break;
     case 'rgrp': S.rgrp = t.dataset.v; render(); break;
