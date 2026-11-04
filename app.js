@@ -10,6 +10,7 @@
 const NIVELES = ['Descanso','Baja','Media','Alta'];
 const DIAS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
 const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 /* ---------- fechas ---------- */
@@ -1369,6 +1370,16 @@ function dlgVerReceta(id){
       : '<button class="btn" data-act="copiarReceta" data-id="'+esc(r.id)+'">Copiar a mis recetas</button>') +
     '<button class="btn ghost" style="margin-top:10px" data-act="cerrar">Cerrar</button>');
 }
+const USOS = [['Desayuno','desayun'],['Media mañana','media|snack'],['Almuerzo','almuerz|comida'],['Merienda','merienda'],['Cena','cena']];
+const usosDe = txt => { const u = norm(txt || ''); return USOS.filter(x => new RegExp(x[1]).test(u)).map(x => x[0]); };
+function usoResumen(){ const v = $$('.uso-ck').filter(c => c.checked).map(c => c.value); return v.length ? v.join(', ') : 'Elige una o varias comidas'; }
+function usoHtml(valor){
+  const sel = usosDe(valor);
+  return '<details class="uso" id="r_usoBox"><summary id="r_usoRes" style="min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;border:1px solid var(--t-line);border-radius:12px;font-size:17px;cursor:pointer">'+esc(sel.length ? sel.join(', ') : 'Elige una o varias comidas')+'<span aria-hidden="true">▾</span></summary>' +
+    '<div style="padding:8px 4px">' + USOS.map(x => '<label style="display:flex;gap:12px;align-items:center;min-height:48px;font-size:18px"><input type="checkbox" class="uso-ck" value="'+x[0]+'" style="width:26px;min-height:26px"'+(sel.indexOf(x[0]) >= 0 ? ' checked' : '')+'> '+x[0]+'</label>').join('') + '</div></details>';
+}
+const usoLeer = () => $$('.uso-ck').filter(c => c.checked).map(c => c.value).join(', ');
+function usoPoner(valor){ const sel = usosDe(valor); $$('.uso-ck').forEach(c => { c.checked = sel.indexOf(c.value) >= 0; }); const r = $('#r_usoRes'); if (r) r.firstChild.textContent = usoResumen(); }
 function dlgFormReceta(r, pendientes){
   S.rIncOk = false;
   r = r || {};
@@ -1384,7 +1395,7 @@ function dlgFormReceta(r, pendientes){
   abrirDlg('<h2>'+(r.id ? 'Editar receta' : 'Receta')+'</h2>' + falta + decl + no + base +
     '<div class="field"><label class="f" for="r_name">Nombre</label><input id="r_name" value="'+esc(r.name||'')+'" autocomplete="off"></div>' +
     '<div class="grid2"><div class="field"><label class="f" for="r_serv">Raciones</label><input id="r_serv" inputmode="numeric" value="'+esc(r.servings||4)+'"></div>' +
-    '<div class="field"><label class="f" for="r_use">Utilizar en</label><input id="r_use" value="'+esc(r.useIn||'Almuerzo, Cena')+'"></div></div>' +
+    '<div class="field"><label class="f" id="r_uselbl">Utilizar en</label>'+usoHtml(r.useIn || 'Almuerzo, Cena')+'</div></div>' +
     '<div class="field"><label class="f" for="r_ing">Ingredientes (uno por línea)</label><textarea id="r_ing" rows="8" style="padding:12px 14px;line-height:1.4">'+esc((r.ingredients||[]).join('\n'))+'</textarea></div>' +
     '<div class="field"><label class="f" for="r_prep">Preparación</label><textarea id="r_prep" rows="6" style="padding:12px 14px;line-height:1.4">'+esc(r.prep||'')+'</textarea></div>' +
     '<button class="btn secondary" data-act="calcReceta" style="margin-bottom:6px">🧮 Calcular macros desde los ingredientes</button>' +
@@ -1413,6 +1424,7 @@ async function guardarReceta(id){
   const ing = $('#r_ing').value.split('\n').map(x => x.trim()).filter(Boolean);
   if (!name) { $('#r_msg').textContent = 'Escribe el nombre.'; return; }
   if (!ing.length) { $('#r_msg').textContent = 'Escribe al menos un ingrediente.'; return; }
+  if (!usoLeer()) { $('#r_usoBox').open = true; $('#r_msg').textContent = 'Elige en qué comidas se puede usar (Desayuno, Almuerzo…).'; return; }
   let kcal = Math.round(leerNum('r_kcal')), prot = leerNum('r_p'), carb = leerNum('r_c'), fat = leerNum('r_g'), peso = Math.round(leerNum('r_w'));
   if (!kcal && !prot && !carb && !fat) { // sin macros: se estiman desde los ingredientes
     const e = RPT_RECETAS.estimarMacros(ing, Math.max(parseInt($('#r_serv').value, 10) || 1, 1));
@@ -1420,7 +1432,7 @@ async function guardarReceta(id){
   }
   if (recetaIncoherente({kcal, prot, carb, fat}) && !S.rIncOk) { S.rIncOk = true; $('#r_msg').className = 'msg err'; $('#r_msg').textContent = '⚠ Las kcal ('+kcal+') no cuadran con los macros: P '+prot+' · C '+carb+' · G '+fat+' dan unas '+Math.round(kcalMacros({prot, carb, fat}))+' kcal. Corrige los valores o pulsa «Calcular desde los ingredientes». Si estás seguro, pulsa Guardar otra vez.'; return; }
   S.rIncOk = false;
-  const datos = { name, servings:Math.max(parseInt($('#r_serv').value, 10) || 1, 1), useIn:($('#r_use').value || '').trim(), ingredients:ing,
+  const datos = { name, servings:Math.max(parseInt($('#r_serv').value, 10) || 1, 1), useIn:usoLeer(), ingredients:ing,
     prep:($('#r_prep').value || '').trim(), kcal, prot, carb, fat, weight:peso,
     category:RPT_RECETAS.categorizar(kcal, prot, carb, fat), shared:$('#r_sh').checked, updatedMs:Date.now(),
     sinContar:RPT_RECETAS.estimarMacros(ing, Math.max(parseInt($('#r_serv').value, 10) || 1, 1)).noReconocidos };
@@ -1736,10 +1748,11 @@ document.addEventListener('input', e => {
   if (e.target && e.target.id === 'rq2') { S.realQ = e.target.value; dlgReal(); const n = $('#rq2'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
   if (e.target && e.target.id === 'sq') { S.slotQ = e.target.value; dlgSlot(); const n = $('#sq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; } if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
 document.addEventListener('change', e => {
+  if (e.target && e.target.classList && e.target.classList.contains('uso-ck')) { const r = $('#r_usoRes'); if (r) r.firstChild.textContent = usoResumen(); return; }
   if (e.target && e.target.id === 'r_base') {
     const o = recetaPorId(e.target.value); if (!o) return;
     const put = (id, v) => { const el = $('#'+id); if (el) el.value = v; };
-    put('r_name', (o.name||'') + ' (copia)'); put('r_serv', o.servings||4); put('r_use', o.useIn||'Almuerzo, Cena');
+    put('r_name', (o.name||'') + ' (copia)'); put('r_serv', o.servings||4); usoPoner(o.useIn || 'Almuerzo, Cena');
     put('r_ing', (o.ingredients||[]).join('\n')); put('r_prep', o.prep||'');
     put('r_kcal', o.kcal||0); put('r_w', o.weight||0); put('r_p', kgTxt(o.prot||0)); put('r_c', kgTxt(o.carb||0)); put('r_g', kgTxt(o.fat||0));
     const m = $('#r_msg'); if (m) { m.className = 'msg ok'; m.textContent = 'Copiada de «'+o.name+'». Cambia lo que quieras y guarda.'; }
