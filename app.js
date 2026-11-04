@@ -684,8 +684,7 @@ function dlgFijas(){
     const f = fijasDe(p)[slot] || {};
     const dias = Array.isArray(f.days) ? f.days : [0,1,2,3,4];
     return '<div class="card" style="margin-bottom:12px"><h3>'+esc(slot)+'</h3>' +
-      '<div class="field"><label class="f" for="fx'+i+'">Receta fija</label><select id="fx'+i+'"><option value="">— ninguna (la app elige) —</option>' +
-      recs.map(r => '<option value="'+esc(r.id)+'"'+(r.id === f.rid ? ' selected' : '')+'>'+esc(r.name)+'</option>').join('') + '</select></div>' +
+      selBuscable('fx'+i, 'Receta fija', '— ninguna (la app elige) —', recs.map(r => [r.id, r.name]), f.rid) +
       '<p class="sub" style="margin-bottom:6px">Días en que se repite</p><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">' +
       DIA_CORTO.map((d, k) => '<label style="display:flex;flex-direction:column;align-items:center;gap:2px;font-weight:800;font-size:17px"><input type="checkbox" id="fd'+i+'_'+k+'" style="width:28px;min-height:28px"'+(dias.indexOf(k) >= 0 ? ' checked' : '')+'>'+d+'</label>').join('') + '</div>' +
       '<div class="field"><label class="f" for="fs'+i+'">Ración (1 = la receta entera)</label><input id="fs'+i+'" inputmode="decimal" value="'+esc(kgTxt(f.s || 1))+'"></div></div>';
@@ -1074,19 +1073,20 @@ const macrosTxt = r => (r.kcal||0)+' kcal · P '+kgTxt(r.prot||0)+' · C '+kgTxt
 function vRecetario(){
   const lista = S.rtab === 'compartidas' ? S.sharedRecipes : S.recipes;
   const q = norm(S.rq);
-  const f = lista.filter(r => !q || norm([r.name, r.category, r.useIn, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0);
+  const f = lista.filter(r => (S.rtab === 'compartidas' || !S.rgrp || grupoDe(r) === S.rgrp) && (!q || norm([r.name, r.category, r.useIn, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0));
   const filas = f.length ? '<div class="list">' + f.map(r =>
     '<button class="row" data-act="verReceta" data-id="'+esc(r.id)+'"><div class="avatar">🍽</div><div class="grow"><b>'+esc(r.name)+'</b>' +
-    '<p class="sub">'+esc(macrosTxt(r))+' por ración</p>' +
+    '<p class="sub">'+esc(macrosTxt(r))+' por ración'+(S.rtab !== 'compartidas' ? ' · '+(grupoDe(r) === 'importada' ? '📄 Word' : grupoDe(r) === 'manual' ? '✍ A mano' : 'anterior') : '')+'</p>' +
     (recetaIncoherente(r) ? '<p class="sub" style="color:var(--t-bad-fg);font-weight:700">⚠ Las kcal no cuadran con los macros (los macros dan unas '+Math.round(kcalMacros(r))+' kcal). Corrígela.</p>' : '') + (r.sinContar && r.sinContar.length ? '<p class="sub" style="color:var(--t-bad-fg);font-weight:700">⚠ Macros incompletos: sin contar '+esc(r.sinContar.join(', '))+'</p>' : '') + '<p class="sub">'+esc([r.category, r.useIn].filter(Boolean).join(' · '))+(S.rtab==='mias' && r.shared ? ' · 🔗 compartida' : '')+(S.rtab==='compartidas' ? ' · de '+esc(r.ownerName||'otro nutricionista') : '')+'</p></div><span class="chev">›</span></button>').join('') + '</div>'
     : '<div class="empty">'+(lista.length ? 'Ninguna receta coincide con la búsqueda.' : (S.rtab==='compartidas' ? 'Todavía nadie ha compartido recetas.' : 'Todavía no tienes recetas.<br>Crea una o importa fichas de Word.'))+'</div>';
   return '<div class="crumbs"><b>Recetario</b></div><div class="content"><h1>Recetario</h1>' +
     '<div class="tabs" role="tablist"><button role="tab" data-act="rtab" data-v="mias" aria-selected="'+(S.rtab==='mias')+'">Mis recetas ('+S.recipes.length+')</button>' +
     '<button role="tab" data-act="rtab" data-v="compartidas" aria-selected="'+(S.rtab==='compartidas')+'">Compartidas ('+S.sharedRecipes.length+')</button></div>' +
     '<div class="field" style="margin-top:14px"><label class="f" for="rq">Buscar</label><input id="rq" type="search" value="'+esc(S.rq)+'" placeholder="Nombre, ingrediente, categoría…" autocomplete="off"></div>' +
+    (S.rtab !== 'compartidas' && ['importada','manual','antigua'].filter(g => recetasDeGrupo(g).length).length > 1 ? '<div class="btn-row" style="margin-bottom:10px">' + [['','Todas'],['importada','📄 Word'],['manual','✍ A mano'],['antigua','Anteriores']].filter(x => !x[0] || recetasDeGrupo(x[0]).length).map(x => '<button class="btn '+((S.rgrp||'') === x[0] ? '' : 'secondary')+' small" data-act="rgrp" data-v="'+x[0]+'">'+x[1]+'</button>').join('') + '</div>' : '') +
     (S.rmsg ? '<div class="msg '+(S.rmsgOk?'ok':'err')+'">'+esc(S.rmsg)+'</div>' : '') + filas +
     '<div class="btn-row"><button class="btn" data-act="nuevaReceta">＋ Nueva receta</button><button class="btn secondary" data-act="importarWord">📄 Importar de Word</button></div>' +
-    (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar todas mis recetas ('+S.recipes.length+')</button>' : '') +
+    (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar recetas… ('+S.recipes.length+')</button>' : '') +
     '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
 }
 function vCuenta(){
@@ -1370,6 +1370,19 @@ function dlgVerReceta(id){
       : '<button class="btn" data-act="copiarReceta" data-id="'+esc(r.id)+'">Copiar a mis recetas</button>') +
     '<button class="btn ghost" style="margin-top:10px" data-act="cerrar">Cerrar</button>');
 }
+function selBuscable(id, etiqueta, vacio, items, sel){
+  const ops = (arr) => '<option value="">'+esc(vacio)+'</option>' + arr.map(x => '<option value="'+esc(x[0])+'"'+(x[0] === sel ? ' selected' : '')+'>'+esc(x[1])+'</option>').join('');
+  return '<div class="field"><label class="f" for="'+id+'">'+etiqueta+'</label>' +
+    '<input type="search" id="'+id+'_q" data-filtra="'+id+'" data-vacio="'+esc(vacio)+'" data-items="'+esc(JSON.stringify(items))+'" placeholder="Buscar por nombre…" autocomplete="off" aria-label="Buscar en la lista" style="margin-bottom:8px">' +
+    '<select id="'+id+'">'+ops(items)+'</select></div>';
+}
+function filtraSelect(inp){
+  const sel = $('#'+inp.dataset.filtra); if (!sel) return;
+  const todos = JSON.parse(inp.dataset.items || '[]'), q = norm(inp.value), actual = sel.value;
+  const lista = todos.filter(x => !q || norm(x[1]).indexOf(q) >= 0 || x[0] === actual);
+  sel.innerHTML = '<option value="">'+esc(q && !lista.length ? 'Ninguna receta coincide' : inp.dataset.vacio)+'</option>' + lista.map(x => '<option value="'+esc(x[0])+'"'+(x[0] === actual ? ' selected' : '')+'>'+esc(x[1])+'</option>').join('');
+  sel.value = actual;
+}
 const USOS = [['Desayuno','desayun'],['Media mañana','media|snack'],['Almuerzo','almuerz|comida'],['Merienda','merienda'],['Cena','cena']];
 const usosDe = txt => { const u = norm(txt || ''); return USOS.filter(x => new RegExp(x[1]).test(u)).map(x => x[0]); };
 function usoResumen(){ const v = $$('.uso-ck').filter(c => c.checked).map(c => c.value); return v.length ? v.join(', ') : 'Elige una o varias comidas'; }
@@ -1390,8 +1403,7 @@ function dlgFormReceta(r, pendientes){
   else if (r.declaradoWord && r.declaradoWord.kcal && Math.abs(r.declaradoWord.kcal - (r.kcal||0)) > Math.max(40, 0.1*r.declaradoWord.kcal))
     decl = '<div class="notice" style="margin-bottom:12px">El Word decía <b>'+Math.round(r.declaradoWord.kcal)+' kcal</b> (P '+esc(String(r.declaradoWord.prot).replace('.',','))+' · C '+esc(String(r.declaradoWord.carb).replace('.',','))+' · G '+esc(String(r.declaradoWord.grasa).replace('.',','))+'). La app ha calculado <b>'+Math.round(r.kcal||0)+' kcal</b> con los ingredientes. Revisa las cantidades.</div>';
   const base = (!r.id && !r.name && !pendientes && S.recipes.length)
-    ? '<div class="field"><label class="f" for="r_base">Partir de una receta ya existente (opcional)</label><select id="r_base"><option value="">— empezar en blanco —</option>' +
-      S.recipes.slice().sort((x, y) => (x.name||'').localeCompare(y.name||'', 'es')).map(x => '<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>').join('') + '</select></div>' : '';
+    ? selBuscable('r_base', 'Partir de una receta ya existente (opcional)', '— empezar en blanco —', S.recipes.slice().sort((x, y) => (x.name||'').localeCompare(y.name||'', 'es')).map(x => [x.id, x.name]), '') : '';
   abrirDlg('<h2>'+(r.id ? 'Editar receta' : 'Receta')+'</h2>' + falta + decl + no + base +
     '<div class="field"><label class="f" for="r_name">Nombre</label><input id="r_name" value="'+esc(r.name||'')+'" autocomplete="off"></div>' +
     '<div class="grid2"><div class="field"><label class="f" for="r_serv">Raciones</label><input id="r_serv" inputmode="numeric" value="'+esc(r.servings||4)+'"></div>' +
@@ -1439,7 +1451,7 @@ async function guardarReceta(id){
   try {
     let nuevoId = null;
     if (id) await db.collection('nu_recipes').doc(id).update(datos);
-    else nuevoId = (await db.collection('nu_recipes').add(Object.assign({ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now()}, datos))).id;
+    else nuevoId = (await db.collection('nu_recipes').add(Object.assign({ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now(), origen:(S.formReceta && S.formReceta.origen) === 'importada' ? 'importada' : 'manual'}, datos))).id;
     await cargarRecetas();
     if (nuevoId && S.slotPend) { const sp = S.slotPend; S.slotPend = null; S.slot = sp; asignarASlot(nuevoId); return; }
   } catch(e){ $('#r_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
@@ -1464,6 +1476,7 @@ async function importarDocx(files){
   }
   setRmsg(mal.length ? 'No se pudieron leer: '+mal.join('; ') : null, false);
   if (!ok.length) { render(); return; }
+  ok.forEach(r => { r.origen = 'importada'; });
   S.cola = ok; siguienteDeCola(); render();
 }
 async function compartirReceta(id){
@@ -1475,29 +1488,41 @@ async function compartirReceta(id){
 async function copiarReceta(id){
   const r = recetaPorId(id); if (!r) return;
   const c = Object.assign({}, r); delete c.id;
-  Object.assign(c, {ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], shared:false, copiedFrom:r.ownerUid, createdMs:Date.now(), updatedMs:Date.now()});
+  Object.assign(c, {ownerUid:S.user.uid, ownerName:S.user.displayName || (S.user.email||'').split('@')[0], shared:false, origen:'manual', copiedFrom:r.ownerUid, createdMs:Date.now(), updatedMs:Date.now()});
   try { await db.collection('nu_recipes').add(c); await cargarRecetas(); }
   catch(e){ $('#r_msg').textContent = 'No se pudo copiar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
   cerrarDlg(); S.rtab = 'mias'; setRmsg('Copiada a tus recetas.', true); render();
 }
+const grupoDe = r => r.origen === 'importada' ? 'importada' : r.origen === 'manual' ? 'manual' : 'antigua';
+const GRUPOS = {importada:'importadas de Word', manual:'creadas a mano', antigua:'anteriores (sin clasificar)', todas:'todas'};
+const recetasDeGrupo = g => g === 'todas' ? S.recipes : S.recipes.filter(r => grupoDe(r) === g);
 function dlgBorrarTodas(){
-  const n = S.recipes.length; if (!n) return;
-  abrirDlg('<h2>Eliminar todas mis recetas</h2>' +
-    '<p class="sub" style="font-size:18px;margin-bottom:12px">Se eliminarán las <b>'+n+'</b> recetas de «Mis recetas». No se pueden recuperar. Las recetas compartidas por otras personas no se tocan.</p>' +
+  if (!S.recipes.length) return;
+  const fila = g => { const n = recetasDeGrupo(g).length; return n ? '<button class="row" data-act="borrarGrupoDlg" data-g="'+g+'"><div class="grow"><b>Eliminar las '+GRUPOS[g]+'</b><p class="sub">'+n+' receta'+(n>1?'s':'')+'</p></div><span class="chev">›</span></button>' : ''; };
+  abrirDlg('<h2>Eliminar recetas</h2><p class="sub" style="font-size:18px;margin-bottom:12px">Elige qué grupo quieres borrar. Cada grupo se borra por separado. Las recetas compartidas por otras personas no se tocan.</p>' +
+    '<div class="list">'+fila('importada')+fila('manual')+fila('antigua')+'</div>' +
+    '<p class="sub" style="margin:10px 0">«Anteriores» son las que se guardaron antes de existir esta distinción: no se sabe si vinieron de Word o se crearon a mano.</p>' +
+    '<div class="list">'+fila('todas')+'</div><button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cancelar</button>');
+}
+function dlgBorrarGrupo(g){
+  const n = recetasDeGrupo(g).length; if (!n) return;
+  abrirDlg('<h2>Eliminar las recetas '+GRUPOS[g]+'</h2>' +
+    '<p class="sub" style="font-size:18px;margin-bottom:12px">Se eliminarán <b>'+n+'</b> receta'+(n>1?'s':'')+'. No se pueden recuperar.</p>' +
     '<p class="sub" style="font-size:18px;margin-bottom:12px">Los menús ya generados conservan sus platos tal como estaban. Para que cambien, hay que volver a generar el menú.</p>' +
     '<div class="msg err" id="bt_msg"></div>' +
-    '<div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn danger" data-act="borrarTodasOk">Sí, eliminar las '+n+'</button></div>');
+    '<div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn danger" data-act="borrarTodasOk" data-g="'+g+'">Sí, eliminar '+n+'</button></div>');
 }
 async function borrarTodasOk(btn){
+  const g = btn.dataset.g || 'todas';
   btn.disabled = true; btn.textContent = 'Eliminando…';
   try {
-    const ids = S.recipes.map(r => r.id);
+    const ids = recetasDeGrupo(g).map(r => r.id);
     for (let i = 0; i < ids.length; i += 400) {
       const b = db.batch(); ids.slice(i, i+400).forEach(id => b.delete(db.collection('nu_recipes').doc(id))); await b.commit();
     }
     await cargarRecetas();
   } catch(e){ const m = $('#bt_msg'); if (m) m.textContent = 'No se pudo eliminar ('+((e && (e.code||e.message)) || 'error')+').'; btn.disabled = false; btn.textContent = 'Reintentar'; return; }
-  cerrarDlg(); setRmsg('Recetas eliminadas. Ya puedes importar las nuevas.', true); render();
+  cerrarDlg(); setRmsg('Recetas '+GRUPOS[g]+' eliminadas.', true); render();
 }
 async function borrarReceta(id, btn){
   if (!btn.dataset.seguro) { btn.dataset.seguro = '1'; btn.textContent = '¿Seguro? Pulsa otra vez para eliminar'; return; }
@@ -1718,6 +1743,7 @@ document.addEventListener('click', e => {
         const pct = (repartoDe(p).find(x => x[0] === m0.slot) || [0,0])[1], obj = objetivoDia(p, sl.d);
         const s = obj && !m0.extra ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
         cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s), {fija:false}), true, DIAS[sl.d]+' · '+m0.slot+': cambiado a '+r.name+'.'); } break; }
+    case 'rgrp': S.rgrp = t.dataset.v; render(); break;
     case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
     case 'verReceta': dlgVerReceta(t.dataset.id); break;
     case 'nuevaReceta': S.cola = []; dlgFormReceta(null, 0); break;
@@ -1731,6 +1757,7 @@ document.addEventListener('click', e => {
     case 'copiarReceta': copiarReceta(t.dataset.id); break;
     case 'borrarReceta': borrarReceta(t.dataset.id, t); break;
     case 'borrarTodasDlg': dlgBorrarTodas(); break;
+    case 'borrarGrupoDlg': dlgBorrarGrupo(t.dataset.g); break;
     case 'borrarTodasOk': borrarTodasOk(t); break;
     case 'horasComp': dlgComp(t.dataset.k || ''); break;
     case 'guardarComp': guardarComp(t.dataset.k || ''); break;
@@ -1745,6 +1772,7 @@ document.addEventListener('click', e => {
   }
 });
 document.addEventListener('input', e => {
+  if (e.target && e.target.dataset && e.target.dataset.filtra) { filtraSelect(e.target); return; }
   if (e.target && e.target.id === 'rq2') { S.realQ = e.target.value; dlgReal(); const n = $('#rq2'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
   if (e.target && e.target.id === 'sq') { S.slotQ = e.target.value; dlgSlot(); const n = $('#sq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; } if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
 document.addEventListener('change', e => {
