@@ -454,6 +454,66 @@ function objetivosComidas(p, i, meals){
     return {kcal:resto.kcal*q, prot:resto.prot*q, carb:resto.carb*q, fat:resto.fat*q};
   });
 }
+/* ---------- menú enlazado: un usuario copia el menú de otro (pareja, familia) ---------- */
+const esCopia = p => !!p && p.menuMode === 'copia' && !!p.copiaDe;
+const fuenteDe = p => esCopia(p) ? S.patients.find(x => x.id === p.copiaDe && x.id !== p.id) : null;
+function dlgModoMenu(){
+  const p = pacienteActual(); if (!p) return;
+  const otros = S.patients.filter(x => x.id !== p.id && x.menuMode !== 'copia');
+  const act = esCopia(p) && fuenteDe(p) ? fuenteDe(p).id : null;
+  abrirDlg('<h2>Menú de '+esc(p.name)+'</h2><p class="sub" style="margin-bottom:12px">¿Este menú es propio, o es una copia del menú de otro usuario con el que convive? En una copia se repiten los mismos platos y se ajustan las raciones a su peso y objetivos.</p>' +
+    '<div class="list"><button class="row" data-act="modoMenuElegir" data-v="propio"><div class="grow"><b>Menú propio (principal)</b><p class="sub">'+(p.menuMode === 'propio' ? '✔ ' : '')+'Se genera con sus recetas y objetivos. Otros usuarios podrán copiarlo.</p></div><span class="chev">›</span></button>' +
+    otros.map(x => '<button class="row" data-act="modoMenuElegir" data-v="copia" data-id="'+esc(x.id)+'"><div class="grow"><b>Copia del menú de '+esc(x.name)+'</b><p class="sub">'+(act === x.id ? '✔ ' : '')+'Mismos platos que '+esc(x.name)+', con ración propia.</p></div><span class="chev">›</span></button>').join('') + '</div>' +
+    (otros.length ? '' : '<p class="sub" style="margin-top:10px">No hay otros usuarios con menú propio a los que enlazar.</p>') +
+    '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cancelar</button>');
+}
+async function elegirModoMenu(modo, id){
+  const p = pacienteActual(); if (!p) return;
+  const datos = modo === 'copia' ? {menuMode:'copia', copiaDe:id} : {menuMode:'propio', copiaDe:null};
+  try { await refPac(p.id).update(datos); } catch(e){ cerrarDlg(); setMsg('No se pudo guardar el enlace ('+((e && (e.code||e.message)) || 'error')+').', false); render(); return; }
+  Object.assign(p, datos);
+  cerrarDlg();
+  if (S.trasModo) { S.trasModo = false; if (modo === 'copia') copiarDeUsuario(); else proponerMenu(); return; }
+  setMsg(modo === 'copia' ? 'Menú enlazado: copia del de '+((fuenteDe(p) || {}).name || '')+'. Pulsa el botón de abajo para copiarlo.' : 'Menú propio.', true); render();
+}
+async function copiarDeUsuario(){
+  const p = pacienteActual(), f = fuenteDe(p);
+  if (!p || !f) { setMsg('El usuario del que se copia ya no existe. Elige otra opción en «Enlace del menú».', false); render(); return; }
+  let src;
+  try { const d = await refPac(f.id).collection('weeks').doc(S.weekStart).get(); src = d.exists && Array.isArray(d.data().menu) ? d.data().menu : null; }
+  catch(e){ setMsg('No se pudo leer el menú de '+f.name+' ('+((e && (e.code||e.message)) || 'error')+').', false); render(); return; }
+  if (!src || !src.some(d => d && d.meals && d.meals.some(m => m.rid))) { setMsg('Esta semana '+f.name+' aún no tiene menú. Genéralo primero en su ficha y vuelve aquí.', false); render(); return; }
+  const previo = S.menu || [], menu = [], sinObj = [];
+  for (let i = 0; i < 7; i++) {
+    const sd = src[i];
+    if (!sd || !sd.meals || !sd.meals.some(m => m.rid)) { menu.push(previo[i] && previo[i].manualDia ? previo[i] : {meals:[]}); continue; }
+    const pd = (previo[i] && previo[i].meals) || [];
+    const reg = JSON.parse(JSON.stringify(sd.meals.filter(m => !m.extra))), ext = JSON.parse(JSON.stringify(sd.meals.filter(m => m.extra && m.rid)));
+    [].concat(reg, ext).forEach(m => { delete m.fija; delete m.real; delete m.manual; });
+    const t = objetivosComidas(p, i, reg);
+    if (!t) sinObj.push(DIAS[i]);
+    let kS = 0, kD = 0;
+    reg.forEach((m, j) => {
+      const r = m.rid && recetaPorId(m.rid); if (!r) return;
+      kS += (m.bk||0) * (m.s||1);
+      const sd0 = m.s; if (t && t[j] && t[j].kcal > 0 && r.kcal > 0) m.s = escalaPara(r, t[j]);
+      kD += (m.bk||0) * (m.s||1);
+    });
+    const ratio = kS > 0 && kD > 0 ? kD / kS : 1;
+    ext.forEach(m => { m.s = Math.round(clamp((m.s||1) * ratio, 0.25, 3) * 20) / 20; });
+    // lo que ya cambiaste a mano en este menú se respeta
+    const manuales = pd.filter(m => m.manual);
+    const res = reg.map(m => manuales.find(x => x.slot === m.slot && !x.extra) || m);
+    const usados = res.map(m => m.slot);
+    manuales.filter(m => m.extra).forEach(m => { res.push(m); });
+    ext.forEach(m => { let n = 1, nom = m.slot; while (res.some(x => x.slot === nom)) { n++; nom = 'Adicional '+n; } m.slot = nom; res.push(m); });
+    manuales.filter(m => !m.extra && usados.indexOf(m.slot) < 0).forEach(m => res.push(m));
+    menu.push({meals:res});
+  }
+  S.menu = menu; S.menuBase = baseDeMenu(menu); S.ptab = 'informe';
+  setMsg('Menú copiado del de '+f.name+' y ajustado a las raciones de '+p.name+'.'+(sinObj.length ? ' Ojo: faltan los niveles de entreno de '+sinObj.join(', ')+' y esos días se han dejado con las raciones originales.' : '')+' Toca cualquier comida de la tabla para cambiarla.', true);
+  render(); window.scrollTo(0, 0); await guardarMenu();
+}
 /* ---------- copiar menú de otra semana ---------- */
 async function dlgCopiarSemana(){
   abrirDlg('<h2>Copiar menú de otra semana</h2><div class="empty">Buscando semanas…</div>');
@@ -526,7 +586,11 @@ function vMenu(p){
     '<p class="sub" style="margin-bottom:10px">'+(hay ? 'Toca una comida para cambiar la receta o la ración.' : 'La app propone una receta para cada comida, con la ración ajustada a las kcal y macros del día.')+'</p>' +
     '<div class="btn-row"><button class="btn secondary" data-act="repartoDlg">Reparto</button><button class="btn secondary" data-act="copiarSemana">📋 Copiar de otra semana</button></div>' +
     '<button class="btn secondary" style="margin-top:10px" data-act="fijasDlg">📌 Comidas fijas'+(() => { const f = fijasDe(p), n = Object.keys(f).filter(k => f[k] && f[k].rid).length; return n ? ' ('+n+(fijasPropias(p) ? '' : ', por defecto')+')' : ''; })()+'</button></div>';
-  const btnGen = '<div class="card"><button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Generar menú de nuevo y ver la tabla' : '✨ Generar menú y ver la tabla')+'</button><p class="sub" style="margin-top:8px">Propone los platos de toda la semana y te lleva a Informe, donde ves el menú en tabla y puedes cambiar cualquier plato.</p>' +
+  const fte = fuenteDe(p), enl = S.patients.some(x => x.id !== p.id);
+  const btnGen = '<div class="card">' + (esCopia(p) && fte
+    ? '<button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Actualizar desde el menú de '+esc(fte.name) : '🔗 Copiar el menú de '+esc(fte.name)+' y adaptarlo')+'</button><p class="sub" style="margin-top:8px">Copia los platos de '+esc(fte.name)+' con las raciones de '+esc(p.name)+'. Lo que hayas cambiado a mano (✎) se conserva.</p>'
+    : '<button class="btn" data-act="proponerMenu">'+(hay ? '🔄 Generar menú de nuevo y ver la tabla' : '✨ Generar menú y ver la tabla')+'</button><p class="sub" style="margin-top:8px">Propone los platos de toda la semana y te lleva a Informe, donde ves el menú en tabla y puedes cambiar cualquier plato.</p>') +
+    (enl ? '<button class="btn ghost" style="margin-top:10px" data-act="modoMenuDlg">🔗 Enlace del menú: '+(esCopia(p) && fte ? 'copia de '+esc(fte.name) : 'propio')+'</button>' : '') +
     (hay ? '<button class="btn secondary" style="margin-top:10px" data-act="ptab" data-v="informe">Ver la tabla</button>' : '') + '</div>';
   if (!hay) return html + vMacros(p) + btnGen;
   html += DIAS.map((d, i) => {
@@ -583,7 +647,7 @@ async function addExtra(d){
   dia.meals = dia.meals || [];
   const usados = dia.meals.map(m => m.slot);
   let n = 1, nombre = 'Adicional'; while (usados.indexOf(nombre) >= 0) { n++; nombre = 'Adicional '+n; }
-  dia.meals.push({slot:nombre, rid:null, extra:true});
+  dia.meals.push({slot:nombre, rid:null, extra:true, manual:true});
   S.slotQ = ''; S.slot = {d, m:dia.meals.length - 1};
   render(); dlgSlot();
   await guardarMenu();
@@ -601,6 +665,7 @@ async function cambiarSlot(fn, cerrar, aviso, reabrir){
   const sl = S.slot; if (!sl) return;
   const antes = totalDia(S.menu[sl.d]);
   fn(S.menu[sl.d].meals[sl.m]);
+  if (esCopia(pacienteActual())) S.menu[sl.d].meals[sl.m].manual = true;
   { const des = totalDia(S.menu[sl.d]); if (Math.abs(des.kcal - antes.kcal) + Math.abs(des.prot - antes.prot) + Math.abs(des.carb - antes.carb) + Math.abs(des.fat - antes.fat) > 0.5) {
     const pp = pacienteActual(), ob = pp && objetivoDia(pp, sl.d);
     aviso = (aviso || DIAS[sl.d]+' · '+S.menu[sl.d].meals[sl.m].slot+':') + ' Variación del día: '+txtVariacion(antes, des)+'. El día queda en '+fmtN(des.kcal)+(ob ? ' de '+ob.kcal : '')+' kcal · P '+Math.round(des.prot)+(ob ? '/'+ob.prot : '')+' · C '+Math.round(des.carb)+(ob ? '/'+ob.carb : '')+' · G '+Math.round(des.fat)+(ob ? '/'+ob.fat : '')+'.'; } }
@@ -944,7 +1009,7 @@ function tablaMenuApp(p){
   const celda = (i, sl) => { const d = S.menu[i], j = d && d.meals ? d.meals.findIndex(x => x.slot === sl) : -1; if (j < 0) return '<td></td>'; const m = d.meals[j];
     if (!m.rid) return '<td class="cel" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'" tabindex="0" role="button"><span class="mut">＋ elegir</span></td>';
     const v = valsComida(m);
-    return '<td class="cel" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'" tabindex="0" role="button"><b>'+esc(m.name)+'</b>'+(m.fija ? ' 📌' : '')+(m.real ? ' 🔁' : '')+'<br><span class="mut">×'+kgTxt(Math.round(m.s*100)/100)+' · '+Math.round(v.kcal)+' kcal</span><br><span class="mut">P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</span></td>'; };
+    return '<td class="cel" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'" tabindex="0" role="button"><b>'+esc(m.name)+'</b>'+(m.fija ? ' 📌' : '')+(m.manual ? ' ✎' : '')+(m.real ? ' 🔁' : '')+'<br><span class="mut">×'+kgTxt(Math.round(m.s*100)/100)+' · '+Math.round(v.kcal)+' kcal</span><br><span class="mut">P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</span></td>'; };
   const filas = slots.map(sl => '<tr><th class="sl">'+esc(sl)+'</th>'+DIAS.map((d, i) => celda(i, sl)).join('')+'</tr>').join('');
   const filaExtra = '<tr><th class="sl">Plato adicional</th>'+DIAS.map((d, i) => S.menu[i] && S.menu[i].meals && S.menu[i].meals.length ? '<td class="cel" data-act="addExtra" data-d="'+i+'" tabindex="0" role="button"><span class="mut">＋ añadir</span></td>' : '<td></td>').join('')+'</tr>';
   const tot = '<tr class="tot"><th class="sl">Total del día</th>'+DIAS.map((d, i) => {
@@ -1621,7 +1686,12 @@ document.addEventListener('click', e => {
     case 'escalaReal': cambiarSlot(m => { if (m.real && !m.real.none) m.real.s = Math.round(clamp(m.real.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }, false, null, dlgReal); break;
     case 'proponerMenu':
       if (S.menu && S.menu.some(d => d.meals && d.meals.some(m => m.rid)) && !t.dataset.seguro) { t.dataset.seguro = '1'; t.textContent = '⚠ Pulsa otra vez: se sustituye el menú'; break; }
-      proponerMenu(); break;
+      { const pp = pacienteActual();
+        if (pp && !pp.menuMode && S.patients.some(x => x.id !== pp.id && x.menuMode !== 'copia')) { S.trasModo = true; dlgModoMenu(); break; }
+        if (esCopia(pp)) { copiarDeUsuario(); break; }
+        proponerMenu(); break; }
+    case 'modoMenuDlg': S.trasModo = false; dlgModoMenu(); break;
+    case 'modoMenuElegir': elegirModoMenu(t.dataset.v, t.dataset.id); break;
     case 'copiarSemana': dlgCopiarSemana(); break;
     case 'copiarDe': copiarDe(t.dataset.w); break;
     case 'repartoDlg': dlgReparto(); break;
