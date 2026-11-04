@@ -147,9 +147,9 @@ function vPaciente(){
   const p = pacienteActual();
   if (!p) return '<div class="content"><div class="empty">Usuario no encontrado.</div></div>';
   const t = (v, txt) => '<button role="tab" data-act="ptab" data-v="'+v+'" aria-selected="'+(S.ptab===v)+'">'+txt+'</button>';
-  const tabs = '<div class="tabs" role="tablist">'+t('entreno','Entreno')+t('menu','Menú')+t('informe','Informe')+(S.compraOn ? t('compra','🛒 Compra') : '')+'</div>';
+  const tabs = '<div class="tabs" role="tablist">'+t('entreno','Entreno')+t('menu','Menú')+t('resumen','Resumen')+t('informe','Informe')+(S.compraOn ? t('compra','🛒 Compra') : '')+'</div>';
   const kg = kgDe();
-  const cuerpo = S.ptab==='datos' ? vResumen(p) : S.ptab==='entreno' ? vEntreno(p) : S.ptab==='informe' ? vInforme(p) : S.ptab==='compra' ? vCompraTab(p) : vMenuTab(p);
+  const cuerpo = S.ptab==='datos' ? vResumen(p) : S.ptab==='entreno' ? vEntreno(p) : S.ptab==='informe' ? vInforme(p) : S.ptab==='resumen' ? vResumenSem(p) : S.ptab==='compra' ? vCompraTab(p) : vMenuTab(p);
   return '<div class="crumbs"><a href="#" data-act="volver">Usuarios</a> › <b>'+esc(p.name)+'</b></div><div class="content">' +
     '<div class="pacthead"><h1>'+esc(p.name)+'</h1><button class="pesochip" data-act="pesoDlg" aria-label="Anotar peso">⚖️ '+(kg ? kgTxt(kg)+' kg' : 'Anotar peso')+'</button></div>' + avisosHtml(p) + tabs + cuerpo + '</div>';
 }
@@ -319,7 +319,7 @@ function vMacros(p){
   if (!p.sex) falta.push('sexo'); if (!p.birthYear) falta.push('año de nacimiento'); if (!p.heightCm) falta.push('altura');
   const kg = S.weights.length ? S.weights[0].kg : null;
   if (!kg) falta.push('un peso');
-  if (falta.length) return '<div class="card"><h3>Calorías y macros</h3><p class="sub">Para calcularlos falta: '+falta.join(', ')+'. Complétalo en Resumen → Editar datos.</p></div>';
+  if (falta.length) return '<div class="card"><h3>Calorías y macros</h3><p class="sub">Para calcularlos falta: '+falta.join(', ')+'. Complétalo en Datos → Editar datos.</p></div>';
   const comp = diasCompeticion(p.id), obj = tipoObjetivo(p);
   const filas = DIAS.map((d,i) => {
     if (!lv[i]) return '';
@@ -331,8 +331,16 @@ function vMacros(p){
 /* ---------- menú semanal ----------
    Cada día se reparte en comidas (porcentaje de las kcal y macros del día). Para cada comida se elige
    la receta del recetario que mejor encaja y se ajusta la ración. Todo se puede cambiar a mano. */
-const REPARTO_DEF = [['Desayuno',25],['Media mañana',10],['Almuerzo',30],['Merienda',10],['Cena',25]];
-const repartoDe = p => (Array.isArray(p.reparto) && p.reparto.length === 5) ? REPARTO_DEF.map((x,i) => [x[0], Number(p.reparto[i])||0]) : REPARTO_DEF;
+const REPARTO_DEF = [['Desayuno',25],['Media mañana',10],['Almuerzo',25],['Postre almuerzo',5],['Merienda',10],['Cena',20],['Postre cena',5]];
+const repartoDe = p => {
+  const a = p.reparto;
+  if (Array.isArray(a) && a.length === 7) return REPARTO_DEF.map((x,i) => [x[0], Number(a[i])||0]);
+  if (Array.isArray(a) && a.length === 5) { // reparto antiguo: se saca el postre del almuerzo y de la cena
+    const n = a.map(Number), pa = Math.round(n[2]/6), pc = Math.round(n[4]/5);
+    return [['Desayuno',n[0]],['Media mañana',n[1]],['Almuerzo',n[2]-pa],['Postre almuerzo',pa],['Merienda',n[3]],['Cena',n[4]-pc],['Postre cena',pc]];
+  }
+  return REPARTO_DEF;
+};
 function kgDe(){ return S.weights.length ? S.weights[0].kg : null; }
 function datosOk(p){ return !!(p.sex && p.birthYear && p.heightCm && kgDe()); }
 function objetivoDia(p, i){
@@ -342,6 +350,7 @@ function objetivoDia(p, i){
 }
 function aptaPara(r, slot){
   const u = norm(r.useIn || '');
+  if (/^Postre/.test(slot)) return u.indexOf('postre') >= 0;
   if (slot === 'Desayuno') return u.indexOf('desayun') >= 0;
   if (slot === 'Almuerzo') return u.indexOf('almuerz') >= 0 || u.indexOf('comida') >= 0;
   if (slot === 'Cena') return u.indexOf('cena') >= 0;
@@ -372,6 +381,7 @@ function candidatas(slot){
   const buenas = S.recipes.filter(r => (r.kcal||0) > 0 && !recetaIncoherente(r));
   const todas = buenas.length >= 3 ? buenas : S.recipes.filter(r => (r.kcal||0) > 0);
   const aptas = todas.filter(r => aptaPara(r, slot));
+  if (/^Postre/.test(slot)) return aptas;   // sin recetas de postre no se inventa ninguna
   return aptas.length ? aptas : todas;
 }
 const baseDeMenu = menu => menu.map(d => { const t = totalDia(d || {meals:[]}); return {kcal:Math.round(t.kcal), prot:Math.round(t.prot), carb:Math.round(t.carb), fat:Math.round(t.fat)}; });
@@ -393,7 +403,8 @@ const fijaDe = (p, slot, i) => {
 async function proponerMenu(){
   const p = pacienteActual(); if (!p) return;
   if (!S.recipes.length) { setMsg('Primero necesitas recetas en el Recetario.', false); render(); return; }
-  const rep = repartoDe(p), usos = {}, menu = [];
+  const repAll = repartoDe(p), usos = {}, menu = [];
+  const rep = repAll.filter(([slot]) => !/^Postre/.test(slot) || candidatas(slot).length);
   for (let i = 0; i < 7; i++) {
     const obj = objetivoDia(p, i), meals = [], hoy = {};
     if (obj) {
@@ -416,9 +427,9 @@ async function proponerMenu(){
       });
     }
     if (obj) afinarDia(obj, meals, menu[i-1], usos, (S.levels && S.levels[i]) || 0);
-    menu.push({meals});
+    menu.push({meals: obj ? repAll.map(([sl]) => meals.find(m => m.slot === sl) || {slot:sl, rid:null}) : meals});
   }
-  S.menu = menu; S.menuBase = baseDeMenu(menu); S.ptab = 'informe'; setMsg('Menú generado. Toca cualquier comida de la tabla para cambiarla y verás cómo cambian las kcal y los macros.', true); render(); window.scrollTo(0, 0); await guardarMenu();
+  S.menu = menu; S.menuBase = baseDeMenu(menu); S.ptab = 'menu'; S.mdia = null; setMsg('Menú generado. Toca un día para ver sus comidas, marcar lo que has hecho o cambiar un plato.', true); render(); window.scrollTo(0, 0); await guardarMenu();
 }
 /* Segunda pasada: ajusta el día ENTERO (no cada comida por separado) para que las kcal cuadren y
    la proteína no se quede corta ni la grasa se pase. Prueba otras recetas y raciones comida a comida. */
@@ -522,8 +533,8 @@ async function copiarDeUsuario(){
     manuales.filter(m => !m.extra && usados.indexOf(m.slot) < 0).forEach(m => res.push(m));
     menu.push({meals:res});
   }
-  S.menu = menu; S.menuBase = baseDeMenu(menu); S.ptab = 'informe';
-  setMsg('Menú copiado del de '+f.name+' y ajustado a las raciones de '+p.name+'.'+(sinObj.length ? ' Ojo: faltan los niveles de entreno de '+sinObj.join(', ')+' y esos días se han dejado con las raciones originales.' : '')+' Toca cualquier comida de la tabla para cambiarla.', true);
+  S.menu = menu; S.menuBase = baseDeMenu(menu); S.ptab = 'menu'; S.mdia = null;
+  setMsg('Menú copiado del de '+f.name+' y ajustado a las raciones de '+p.name+'.'+(sinObj.length ? ' Ojo: faltan los niveles de entreno de '+sinObj.join(', ')+' y esos días se han dejado con las raciones originales.' : '')+' Toca un día para ver sus comidas.', true);
   render(); window.scrollTo(0, 0); await guardarMenu();
 }
 /* ---------- copiar menú de otra semana ---------- */
@@ -561,7 +572,7 @@ function totalReal(dia){
   (dia.meals||[]).forEach(m => { if (m.rid) { const v = valsReal(m); t.kcal += v.kcal; t.prot += v.prot; t.carb += v.carb; t.fat += v.fat; } });
   return t;
 }
-const hayReal = dia => (dia.meals||[]).some(m => m.rid && m.real);
+const hayReal = dia => (dia.meals||[]).some(m => m.rid && (m.real || m.estado === 'hecho'));
 function dlgReal(){
   const p = pacienteActual(), sl = S.slot; if (!p || !sl) return;
   const m = S.menu[sl.d].meals[sl.m], plan = valsComida(m);
@@ -578,11 +589,19 @@ function dlgReal(){
   const q = norm(S.realQ || '');
   const lista = S.recipes.filter(r => (r.kcal||0) > 0 && (!q || norm([r.name, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0)).slice(0, q ? 30 : 12);
   h += '<button class="btn secondary" style="margin-bottom:10px" data-act="noComi">🚫 No se comió esta comida</button>' +
+    '<div class="card" style="margin-bottom:10px"><div class="field"><label class="f" for="rl_txt">O escribe lo que has comido (un ingrediente por línea)</label><textarea id="rl_txt" rows="3" placeholder="150 g de pollo&#10;100 g de arroz" style="padding:12px 14px;line-height:1.4"></textarea></div><div class="msg err" id="rl_msg"></div><button class="btn secondary" data-act="realLibre">🧮 Calcular y guardar</button></div>' +
     '<div class="field"><label class="f" for="rq2">Lo que se comió</label><input id="rq2" type="search" value="'+esc(S.realQ||'')+'" placeholder="Buscar receta…" autocomplete="off"></div>' +
     (lista.length ? '<div class="list">'+lista.map(r => { const sc = Math.round(clamp(plan.kcal/Math.max(r.kcal,1), 0.3, 3)*20)/20;
       return '<button class="row" data-act="elegirReal" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(sc)+' · '+Math.round(r.kcal*sc)+' kcal · P '+r1(r.prot*sc)+' · C '+r1(r.carb*sc)+' · G '+r1(r.fat*sc)+'</p></div><span class="chev">›</span></button>'; }).join('')+'</div>' : '<div class="empty">Ninguna receta coincide.</div>') +
     '<div class="btn-row" style="margin-top:12px"><button class="btn secondary" data-act="slotMenu" data-d="'+sl.d+'" data-m="'+sl.m+'">‹ Volver</button><button class="btn" data-act="cerrar">Hecho</button></div>';
   abrirDlg(h);
+}
+function realLibre(){
+  const sl = S.slot, t = ($('#rl_txt').value || '').split('\n').map(x => x.trim()).filter(Boolean);
+  if (!t.length) { $('#rl_msg').textContent = 'Escribe lo que has comido.'; return; }
+  const e = RPT_RECETAS.estimarMacros(t, 1);
+  if (e.noReconocidos.length || !(e.kcal > 0)) { $('#rl_msg').textContent = e.noReconocidos.length ? 'No reconozco: '+e.noReconocidos.join(', ')+'. Escribe cantidades en gramos o añade sus valores entre corchetes.' : 'No he podido calcular las calorías.'; return; }
+  cambiarSlot(m => { delete m.estado; m.real = {slot:m.slot, rid:'libre', name:'Otro: '+t.join(', ').slice(0, 70), s:1, bk:e.kcal, bp:e.prot, bc:e.carb, bf:e.grasa, bw:e.peso}; }, false, null, dlgReal);
 }
 function totalDia(dia){
   const t = {kcal:0, prot:0, carb:0, fat:0};
@@ -590,12 +609,262 @@ function totalDia(dia){
   return t;
 }
 const r1 = x => kgTxt(Math.round(x*10)/10);
+/* ---------- comidas: hecho / no hecho / cambiado ---------- */
+const CERO0 = {kcal:0, prot:0, carb:0, fat:0};
+const sumaV = (a, b) => ({kcal:a.kcal+b.kcal, prot:a.prot+b.prot, carb:a.carb+b.carb, fat:a.fat+b.fat});
+function estMeal(m){ if (!m || !m.rid) return 'vacia'; if (m.real) return m.real.none ? 'no' : 'cambio'; return m.estado === 'hecho' ? 'hecho' : 'pend'; }
+function valsConsum(m){ const e = estMeal(m); return e === 'hecho' ? valsComida(m) : e === 'cambio' ? valsComida(m.real) : CERO0; }
+function resumenDia(dia){
+  let cons = CERO0, pend = CERO0, n = 0, nc = 0;
+  (dia.meals || []).forEach(m => { const e = estMeal(m); if (e === 'vacia') return; n++; if (e === 'pend') pend = sumaV(pend, valsComida(m)); else { nc++; cons = sumaV(cons, valsConsum(m)); } });
+  return {cons, pend, n, nc, proj:sumaV(cons, pend)};
+}
+const CHIP = {hecho:['✅ Hecho','var(--t-good-fg)'], no:['✖ No lo he hecho','var(--t-bad-fg)'], cambio:['🔁 He comido otra cosa','var(--t-chg-fg)'], pend:['⏳ Pendiente','var(--t-muted)'], vacia:['＋ Elegir plato','var(--t-muted)']};
+const chip = e => '<span style="font-weight:800;font-size:17px;color:'+CHIP[e][1]+'">'+CHIP[e][0]+'</span>';
+const barra = (pct, col) => '<div style="height:10px;border-radius:6px;background:var(--t-line);overflow:hidden;margin:8px 0 6px"><div style="height:100%;width:'+Math.min(100, Math.round(pct*100))+'%;background:'+col+'"></div></div>';
+const macTxt = v => fmtN(v.kcal)+' kcal · P '+Math.round(v.prot)+' · C '+Math.round(v.carb)+' · G '+Math.round(v.fat);
+/* Cuánto se parece una receta a la comida actual: se compara con la misma energía y se miran los macros. */
+function similitud(r, v){
+  const s = Math.round(clamp(v.kcal/Math.max(r.kcal, 1), 0.5, 2.5)*20)/20;
+  const x = {kcal:r.kcal*s, prot:r.prot*s, carb:r.carb*s, fat:r.fat*s};
+  const err = 0.15*Math.abs(x.kcal-v.kcal)/Math.max(v.kcal, 50) + 0.4*Math.abs(x.prot-v.prot)/Math.max(v.prot, 8) + 0.25*Math.abs(x.carb-v.carb)/Math.max(v.carb, 12) + 0.2*Math.abs(x.fat-v.fat)/Math.max(v.fat, 6);
+  return Math.round(100*clamp(1 - err, 0, 1));
+}
+/* Desajuste del día: lo previsto (registrado + pendiente) frente al objetivo. */
+function ajusteDia(p, i){
+  const obj = objetivoDia(p, i), dia = S.menu && S.menu[i]; if (!obj || !dia || !dia.meals) return null;
+  const rd = resumenDia(dia), pr = rd.proj;
+  const d = {kcal:obj.kcal-pr.kcal, prot:obj.prot-pr.prot, carb:obj.carb-pr.carb, fat:obj.fat-pr.fat}, msgs = [];
+  const tk = Math.max(120, 0.06*obj.kcal);
+  if (d.kcal > tk) msgs.push('Te faltan unas '+Math.round(d.kcal)+' kcal'); else if (d.kcal < -tk) msgs.push('Te pasas unas '+Math.round(-d.kcal)+' kcal');
+  if (d.prot > Math.max(10, 0.1*obj.prot)) msgs.push('Faltan '+Math.round(d.prot)+' g de proteína');
+  if (d.carb > Math.max(25, 0.12*obj.carb)) msgs.push('Faltan '+Math.round(d.carb)+' g de hidratos'); else if (d.carb < -Math.max(30, 0.15*obj.carb)) msgs.push('Sobran '+Math.round(-d.carb)+' g de hidratos');
+  if (d.fat < -Math.max(10, 0.2*obj.fat)) msgs.push('Sobran '+Math.round(-d.fat)+' g de grasa');
+  return {obj, rd, d, msgs, alerta:msgs.length > 0};
+}
+const COMPL = {prot:['yogur proteico','claras de huevo','pechuga de pavo','atun'], carb:['platano','pan integral','arroz cocido','copos de avena'], fat:['nueces','almendra','aceite de oliva']};
+const NOMBRE_COMPL = {'claras de huevo':'claras de huevo','atun':'atún','platano':'plátano','copos de avena':'copos de avena'};
+function sugerencias(ad){
+  const n = {prot:Math.max(ad.d.prot, 0), carb:Math.max(ad.d.carb, 0), fat:Math.max(ad.d.fat, 0)};
+  const rel = {prot:n.prot/Math.max(ad.obj.prot, 1), carb:n.carb/Math.max(ad.obj.carb, 1), fat:n.fat/Math.max(ad.obj.fat, 1)};
+  let k = Object.keys(rel).sort((a, b) => rel[b] - rel[a])[0];
+  if (rel[k] < 0.05) { if (ad.d.kcal > 120) k = 'carb'; else return []; }
+  const need = n[k] > 0 ? n[k] : ad.d.kcal/4;
+  return COMPL[k].map(nombre => {
+    const e = RPT_RECETAS.estimarMacros(['100 g '+nombre], 1), per = k === 'fat' ? e.grasa : e[k]; if (!per || per < 1) return null;
+    const g = clamp(Math.round(need/(per/100)/5)*5, 20, 250), f = g/100;
+    return {key:nombre, g, kcal:e.kcal*f, prot:e.prot*f, carb:e.carb*f, fat:e.grasa*f};
+  }).filter(Boolean).slice(0, 3);
+}
+async function addComplemento(d, nombre, g){
+  const dia = S.menu[d]; if (!dia) return;
+  const e = RPT_RECETAS.estimarMacros([g+' g '+nombre], 1), usados = dia.meals.map(m => m.slot);
+  let n = 1, slot = 'Complemento'; while (usados.indexOf(slot) >= 0) { n++; slot = 'Complemento '+n; }
+  dia.meals.push({slot, rid:'alim:'+nombre, name:g+' g de '+(NOMBRE_COMPL[nombre] || nombre), s:1, bk:e.kcal, bp:e.prot, bc:e.carb, bf:e.grasa, bw:g, extra:true, alimento:true, ing:[g+' g '+nombre], manual:true});
+  setMsg('Añadido: '+g+' g de '+(NOMBRE_COMPL[nombre] || nombre)+' al '+DIAS[d].toLowerCase()+'.', true);
+  render(); await guardarMenu();
+}
+function tarjetaDia(p, i){
+  const dia = S.menu[i], lvl = S.levels && S.levels[i], tit = esc(DIAS[i])+(lvl ? ' · '+NIVELES[lvl-1] : '');
+  if (!dia || !dia.meals || !dia.meals.some(m => m.rid)) return '<div class="row" style="opacity:.65"><div class="grow"><b>'+tit+'</b><p class="sub">Sin menú</p></div></div>';
+  const obj = objetivoDia(p, i), rd = resumenDia(dia), ad = ajusteDia(p, i), pct = obj ? rd.proj.kcal/obj.kcal : 1;
+  return '<button class="row" data-act="diaMenu" data-d="'+i+'"><div class="grow"><b>'+tit+'</b>' +
+    '<p class="sub">'+rd.nc+' de '+rd.n+' comidas registradas</p>'+barra(rd.nc/Math.max(rd.n, 1), 'var(--t-accent)') +
+    '<p class="sub">Previsto: '+fmtN(rd.proj.kcal)+(obj ? ' de '+obj.kcal : '')+' kcal'+(obj ? ' ('+Math.round(pct*100)+' %)' : '')+'</p>' +
+    (ad && ad.alerta ? '<p class="sub" style="color:var(--t-chg-fg);font-weight:800">⚠ '+esc(ad.msgs[0])+'</p>' : '')+'</div><span class="chev">›</span></button>';
+}
+function tarjetaComida(i, j, m){
+  const e = estMeal(m);
+  if (e === 'vacia') return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b><p class="sub">Sin plato · toca para elegir</p></div><span class="chev">＋</span></button>';
+  const v = valsComida(m);
+  let real = '';
+  if (e === 'cambio') { const rv = valsComida(m.real); real = '<p class="sub" style="color:var(--t-chg-fg);font-weight:700">Comido: '+esc(m.real.name)+' · '+Math.round(rv.kcal)+' kcal · P '+r1(rv.prot)+' · C '+r1(rv.carb)+' · G '+r1(rv.fat)+'</p><p class="sub">Variación: '+txtVariacion(v, rv)+'</p>'; }
+  if (e === 'no') real = '<p class="sub">Variación: '+txtVariacion(v, CERO0)+'</p>';
+  return '<button class="row" data-act="comidaDlg" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b>'+(m.fija ? ' 📌' : '')+(m.manual ? ' ✎' : '')+(m.ajustada ? ' ⚖' : '') +
+    '<p style="font-weight:800;font-size:18px;margin:2px 0">'+esc(m.name)+'</p>' +
+    '<p class="sub">×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+' · '+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p>'+real +
+    '<p style="margin-top:4px">'+chip(e)+'</p></div><span class="chev">›</span></button>';
+}
+function vDiaMenu(p, i){
+  const dia = S.menu[i], obj = objetivoDia(p, i), rd = resumenDia(dia), lvl = S.levels && S.levels[i], ad = ajusteDia(p, i);
+  let h = '<button class="btn ghost" style="margin-bottom:10px" data-act="diaMenu" data-d="">‹ Todos los días</button>';
+  h += '<div class="card"><h3>'+esc(DIAS[i])+(lvl ? ' · '+NIVELES[lvl-1] : '')+'</h3>' +
+    (obj ? '<p class="sub">Objetivo: '+obj.kcal+' kcal · P '+obj.prot+' · C '+obj.carb+' · G '+obj.fat+'</p>' : '') +
+    '<p class="sub">Registrado: '+macTxt(rd.cons)+'</p><p class="sub">Previsto del día: '+macTxt(rd.proj)+'</p>' +
+    (obj ? barra(rd.proj.kcal/obj.kcal, estado(rd.proj.kcal/obj.kcal, PAL_APP)) : '');
+  if (ad && ad.alerta) {
+    const sg = sugerencias(ad);
+    h += '<div class="notice" style="margin-top:10px"><b>⚠ Día desajustado</b><br>'+ad.msgs.map(esc).join('<br>') +
+      (sg.length ? '<p style="margin:8px 0 4px;font-weight:700">Puedes añadir un complemento:</p>' + sg.map(x => '<button class="row" style="margin-bottom:6px" data-act="addCompl" data-d="'+i+'" data-n="'+esc(x.key)+'" data-g="'+x.g+'"><div class="grow"><b>＋ '+x.g+' g de '+esc(NOMBRE_COMPL[x.key] || x.key)+'</b><p class="sub">'+Math.round(x.kcal)+' kcal · P '+Math.round(x.prot)+' · C '+Math.round(x.carb)+' · G '+Math.round(x.fat)+'</p></div></button>').join('') : '') +
+      '<button class="btn secondary" style="margin-top:8px" data-act="eqDlg" data-d="'+i+'">⚖ Equilibrar la semana</button></div>';
+  }
+  h += '</div><div class="list">' + dia.meals.map((m, j) => tarjetaComida(i, j, m)).join('') + '</div>' +
+    '<button class="btn secondary" style="margin-top:12px" data-act="addExtra" data-d="'+i+'">＋ Añadir un plato adicional</button>';
+  return h;
+}
+function semanaEstado(p){
+  const out = {dias:[], T:CERO0, cons:CERO0, pend:CERO0, proj:CERO0};
+  for (let i = 0; i < 7; i++) {
+    const obj = objetivoDia(p, i), dia = S.menu && S.menu[i];
+    if (!obj || !dia || !dia.meals || !dia.meals.some(m => m.rid)) continue;
+    const rd = resumenDia(dia), o = {kcal:obj.kcal, prot:obj.prot, carb:obj.carb, fat:obj.fat};
+    out.dias.push({i, obj:o, rd}); out.T = sumaV(out.T, o); out.cons = sumaV(out.cons, rd.cons); out.pend = sumaV(out.pend, rd.pend); out.proj = sumaV(out.proj, rd.proj);
+  }
+  return out;
+}
+const difSem = E => ({kcal:E.T.kcal-E.proj.kcal, prot:E.T.prot-E.proj.prot, carb:E.T.carb-E.proj.carb, fat:E.T.fat-E.proj.fat});
+const semanaOk = (E, D) => Math.abs(D.kcal) < Math.max(150, 0.015*E.T.kcal) && D.prot < Math.max(25, 0.06*E.T.prot) && Math.abs(D.carb) < Math.max(60, 0.08*E.T.carb) && D.fat > -Math.max(25, 0.1*E.T.fat);
+function eqCard(p){
+  const E = semanaEstado(p); if (!E.dias.length) return '';
+  const D = difSem(E), ok = semanaOk(E, D);
+  return '<div class="card'+(ok ? '' : ' accent')+'"><h3>Equilibrio de la semana</h3><p class="sub" style="margin-bottom:10px">'+(ok ? 'La semana va equilibrada: el cierre previsto está dentro del objetivo.' : (Math.abs(D.kcal) < Math.max(150, 0.015*E.T.kcal) ? 'Las calorías de la semana cuadran, pero los macros no: '+txtVariacion(E.T, E.proj)+'.' : D.kcal < 0 ? 'A este ritmo cierras la semana unas <b>'+fmtN(-D.kcal)+' kcal por encima</b> del objetivo.' : 'A este ritmo cierras la semana unas <b>'+fmtN(D.kcal)+' kcal por debajo</b> del objetivo.'))+'</p>' +
+    '<button class="btn" data-act="eqDlg">⚖ Equilibrar la semana</button>' +
+    '<button class="btn secondary" style="margin-top:10px" data-act="claudeSemana">💬 Preguntar a Claude</button></div>';
+}
+function vSemanaMenu(p){
+  const E = semanaEstado(p), D = difSem(E);
+  let h = '<button class="btn ghost" style="margin-bottom:10px" data-act="diaMenu" data-d="">‹ Días</button>';
+  h += '<div class="card"><h3>Semana completa</h3>' +
+    '<p class="sub">Objetivo de la semana</p><p style="font-weight:800;font-size:19px;margin-bottom:8px">'+macTxt(E.T)+'</p>' +
+    '<p class="sub">Registrado hasta ahora</p><p style="font-weight:800;font-size:19px;margin-bottom:8px">'+macTxt(E.cons)+'</p>' +
+    '<p class="sub">Todavía pendiente (según el menú)</p><p style="font-weight:800;font-size:19px;margin-bottom:8px">'+macTxt(E.pend)+'</p>' +
+    '<p class="sub">Cierre previsto de la semana</p><p style="font-weight:800;font-size:19px">'+macTxt(E.proj)+'</p>' +
+    barra(E.proj.kcal/Math.max(E.T.kcal, 1), estado(E.proj.kcal/Math.max(E.T.kcal, 1), PAL_APP)) +
+    '<p class="sub">Diferencia con el objetivo: <b>'+txtVariacion(E.T, E.proj)+'</b></p></div>' + eqCard(p);
+  h += '<h3 style="margin:14px 0 8px">Día a día</h3><div class="list">' + E.dias.map(x =>
+    '<button class="row" data-act="diaMenu" data-d="'+x.i+'"><div class="grow"><b>'+esc(DIAS[x.i])+'</b><p class="sub">Registrado '+fmtN(x.rd.cons.kcal)+' kcal ('+x.rd.nc+'/'+x.rd.n+' comidas)</p><p class="sub">Previsto '+fmtN(x.rd.proj.kcal)+' de '+x.obj.kcal+' kcal · P '+Math.round(x.rd.proj.prot)+'/'+x.obj.prot+' · C '+Math.round(x.rd.proj.carb)+'/'+x.obj.carb+' · G '+Math.round(x.rd.proj.fat)+'/'+x.obj.fat+'</p></div><span class="chev">›</span></button>').join('') + '</div>';
+  return h;
+}
+/* ---------- equilibrar la semana ---------- */
+const valsDe = (r, s) => ({kcal:r.kcal*s, prot:r.prot*s, carb:r.carb*s, fat:r.fat*s});
+const errRel = (v, t) => 0.15*Math.abs(v.kcal-t.kcal)/Math.max(t.kcal, 50) + 0.35*Math.abs(v.prot-t.prot)/Math.max(t.prot, 8) + 0.3*Math.abs(v.carb-t.carb)/Math.max(t.carb, 12) + 0.2*Math.abs(v.fat-t.fat)/Math.max(t.fat, 6);
+/* Días de carga (Media/Alta) y de competición (el día y el anterior): nunca se recorta la comida. */
+const diaProtegido = (p, i) => !!(S.levels && S.levels[i] >= 3) || !!diasCompeticion(p.id)[sumaDias(S.weekStart, i)];
+function propuestaEquilibrio(p, ids, conPlatos){
+  const E = semanaEstado(p), D = difSem(E);
+  const tgt = E.dias.filter(x => ids.indexOf(x.i) >= 0 && x.rd.pend.kcal > 0 && !(D.kcal < 0 && diaProtegido(p, x.i)));
+  const sumObj = tgt.reduce((a, x) => a + x.obj.kcal, 0), cambios = [];
+  tgt.forEach(x => {
+    const w = x.obj.kcal/sumObj, share = {kcal:D.kcal*w, prot:D.prot*w, carb:D.carb*w, fat:D.fat*w};
+    const dia = S.menu[x.i];
+    const aj = dia.meals.map((m, j) => ({m, j})).filter(o => estMeal(o.m) === 'pend' && !o.m.alimento && !o.m.fija);
+    const tot = aj.reduce((a, o) => sumaV(a, valsComida(o.m)), CERO0); if (!(tot.kcal > 0)) return;
+    aj.forEach(o => {
+      const r = recetaPorId(o.m.rid); if (!r || !(r.kcal > 0)) return;
+      const pv = valsComida(o.m), wj = pv.kcal/tot.kcal;
+      const t = {kcal:Math.max(pv.kcal + share.kcal*wj, 0.3*pv.kcal), prot:Math.max(pv.prot + share.prot*wj, 0), carb:Math.max(pv.carb + share.carb*wj, 0), fat:Math.max(pv.fat + share.fat*wj, 0)};
+      let s2 = escalaPara(r, t), cand = {r, s:s2}, err0 = errRel(valsDe(r, s2), t);
+      if (conPlatos) {
+        const usados = {}; dia.meals.forEach(mm => { if (mm.rid) usados[mm.rid] = true; });
+        let best = {err:err0, r, s:s2};
+        candidatas(o.m.slot).forEach(c => {
+          if (usados[c.id] && c.id !== r.id) return;
+          const sc = escalaPara(c, t), e = errRel(valsDe(c, sc), t) + (sc <= 0.5 || sc >= 2.5 ? 0.15 : 0);
+          if (e < best.err - 0.08) best = {err:e, r:c, s:sc};
+        });
+        cand = {r:best.r, s:best.s};
+      }
+      const cambioPlato = cand.r.id !== r.id;
+      if (!cambioPlato && Math.abs(cand.s - o.m.s) < 0.05) return;
+      const nv = valsDe(cand.r, cand.s);
+      cambios.push({d:x.i, j:o.j, slot:o.m.slot, cambioPlato, de:{name:o.m.name, s:o.m.s, v:pv}, a:{rid:cand.r.id, name:cand.r.name, s:cand.s, v:nv}});
+    });
+  });
+  let cierre = E.proj; cambios.forEach(c => { cierre = sumaV(cierre, {kcal:c.a.v.kcal-c.de.v.kcal, prot:c.a.v.prot-c.de.v.prot, carb:c.a.v.carb-c.de.v.carb, fat:c.a.v.fat-c.de.v.fat}); });
+  return {D, cambios, cierre, T:E.T, ids:tgt.map(x => x.i)};
+}
+function dlgEquilibrio(){
+  const p = pacienteActual(); if (!p) return;
+  const E = semanaEstado(p); if (!E.dias.length) { abrirDlg('<h2>Equilibrar la semana</h2><div class="empty">Esta semana aún no tiene menú.</div><button class="btn ghost" data-act="cerrar">Cerrar</button>'); return; }
+  const D = difSem(E), conPend = E.dias.filter(x => x.rd.pend.kcal > 0);
+  let ultimo = -1; E.dias.forEach(x => { if (x.rd.nc > 0) ultimo = Math.max(ultimo, x.i); });
+  const recorta = D.kcal < 0;
+  if (!S.eqSel) { const fut = conPend.filter(x => x.i > ultimo && !(recorta && diaProtegido(p, x.i))).map(x => x.i); S.eqSel = fut.length ? fut : conPend.filter(x => !(recorta && diaProtegido(p, x.i))).map(x => x.i); }
+  if (S.eqPlatos === undefined) S.eqPlatos = true;
+  let h = '<h2>⚖ Equilibrar la semana</h2><p class="sub" style="margin-bottom:6px">Objetivo: '+macTxt(E.T)+'</p><p class="sub" style="margin-bottom:6px">Cierre previsto: '+macTxt(E.proj)+'</p>' +
+    '<p style="font-weight:800;font-size:18px;margin-bottom:12px">Diferencia: '+txtVariacion(E.T, E.proj)+'</p>';
+  if (!conPend.length) { abrirDlg(h + '<div class="notice">Ya no quedan comidas pendientes que se puedan ajustar. Si quieres, añade un complemento en el día o cambia las comidas que ya registraste.</div><button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>'); return; }
+  h += '<p class="sub" style="margin-bottom:6px">Elige los días que pueden absorber el ajuste:</p><div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
+    conPend.map(x => '<label style="display:flex;gap:8px;align-items:center;font-size:18px;min-height:44px"><input type="checkbox" class="eq-d" value="'+x.i+'" style="width:26px;min-height:26px"'+(S.eqSel.indexOf(x.i) >= 0 ? ' checked' : '')+(recorta && diaProtegido(p, x.i) ? ' disabled' : '')+'> '+esc(DIAS[x.i])+(recorta && diaProtegido(p, x.i) ? ' <span class="sub">(día de carga: no se recorta)</span>' : '')+'</label>').join('') + '</div>' +
+    '<label style="display:flex;gap:10px;align-items:center;font-size:18px;min-height:44px;margin-bottom:12px"><input type="checkbox" id="eq_platos" style="width:26px;min-height:26px"'+(S.eqPlatos ? ' checked' : '')+'> Puede cambiar también platos (no solo raciones)</label>' +
+    '<button class="btn" data-act="eqCalc">Calcular propuesta</button>';
+  const pr = S.eqProp;
+  if (pr) {
+    h += '<h3 style="margin:16px 0 8px">Propuesta</h3>';
+    if (!pr.cambios.length) h += '<div class="notice">No hay cambios que mejoren la semana con esos días. Prueba a marcar más días o a permitir cambiar platos.</div>';
+    else {
+      h += '<div class="list">' + pr.cambios.map(c => '<div class="row" style="cursor:default"><div class="grow"><b>'+esc(DIAS[c.d])+' · '+esc(c.slot)+'</b><p class="sub">'+(c.cambioPlato ? esc(c.de.name)+' ×'+kgTxt(Math.round(c.de.s*100)/100)+' → <b>'+esc(c.a.name)+'</b> ×'+kgTxt(Math.round(c.a.s*100)/100) : esc(c.de.name)+': ×'+kgTxt(Math.round(c.de.s*100)/100)+' → <b>×'+kgTxt(Math.round(c.a.s*100)/100)+'</b>')+'</p><p class="sub">'+Math.round(c.de.v.kcal)+' → '+Math.round(c.a.v.kcal)+' kcal ('+delta(c.a.v.kcal-c.de.v.kcal, 0)+')</p></div></div>').join('') + '</div>';
+      const rest = {kcal:pr.T.kcal-pr.cierre.kcal, prot:pr.T.prot-pr.cierre.prot, carb:pr.T.carb-pr.cierre.carb, fat:pr.T.fat-pr.cierre.fat};
+      h += '<p class="sub" style="margin:10px 0">Con estos cambios la semana cerraría en <b>'+macTxt(pr.cierre)+'</b>'+(semanaOk({T:pr.T}, rest) ? ': dentro del objetivo.' : '. Aún quedaría una diferencia de '+txtVariacion(pr.T, pr.cierre)+': marca más días o añade un complemento.')+'</p>' +
+        '<button class="btn" data-act="eqAplicar">✔ Aplicar todos los cambios</button>';
+    }
+  }
+  h += '<button class="btn secondary" style="margin-top:10px" data-act="claudeSemana">💬 Preguntar a Claude</button><button class="btn ghost" style="margin-top:10px" data-act="cerrar">Cerrar</button>';
+  abrirDlg(h);
+}
+function eqCalc(){
+  const p = pacienteActual(); if (!p) return;
+  S.eqSel = $$('.eq-d').filter(c => c.checked).map(c => parseInt(c.value, 10)); S.eqPlatos = !!($('#eq_platos') && $('#eq_platos').checked);
+  S.eqProp = propuestaEquilibrio(p, S.eqSel, S.eqPlatos); dlgEquilibrio();
+}
+async function eqAplicar(){
+  const p = pacienteActual(), pr = S.eqProp; if (!p || !pr) return;
+  pr.cambios.forEach(c => {
+    const r = recetaPorId(c.a.rid), m = S.menu[c.d].meals[c.j]; if (!r || !m) return;
+    Object.assign(m, comidaDe(r, m.slot, c.a.s), {fija:false, ajustada:true}); if (esCopia(p)) m.manual = true;
+  });
+  S.eqProp = null; S.eqSel = null; cerrarDlg(); setMsg('Semana equilibrada: se han ajustado '+pr.cambios.length+' comidas pendientes (marcadas con ⚖).', true); render(); await guardarMenu();
+}
+function textoClaude(p){
+  const E = semanaEstado(p), kg = kgDe();
+  let t = 'Soy nutricionista deportivo y necesito equilibrar la semana de comidas de '+p.name+(kg ? ' ('+kgTxt(kg)+' kg)' : '')+(p.goal ? ', objetivo: '+p.goal : '')+'. Los días de entreno Medio o Alto no se recorta energía (nunca quitar fuerza a un halterófilo).\n\n';
+  t += 'OBJETIVO SEMANAL: '+macTxt(E.T)+'\nREGISTRADO: '+macTxt(E.cons)+'\nPENDIENTE SEGÚN MENÚ: '+macTxt(E.pend)+'\nDIFERENCIA: '+txtVariacion(E.T, E.proj)+'\n\nDÍAS:\n';
+  E.dias.forEach(x => {
+    const dia = S.menu[x.i];
+    t += '- '+DIAS[x.i]+' (obj. '+x.obj.kcal+' kcal, P'+x.obj.prot+' C'+x.obj.carb+' G'+x.obj.fat+'): '+dia.meals.filter(m => m.rid).map(m => { const e = estMeal(m), v = e === 'cambio' ? valsComida(m.real) : valsComida(m); return m.slot+': '+(e === 'cambio' ? m.real.name : m.name)+' '+Math.round(v.kcal)+' kcal P'+Math.round(v.prot)+' C'+Math.round(v.carb)+' G'+Math.round(v.fat)+' ['+(e === 'hecho' ? 'hecho' : e === 'no' ? 'NO hecho' : e === 'cambio' ? 'cambiado' : 'pendiente')+']'; }).join('; ')+'\n';
+  });
+  t += '\nPropón, de forma concreta, cómo equilibrar los días que quedan: qué comidas pendientes ajustar (ración o plato), cuánto, y qué complemento añadir si hace falta. Sé breve y práctico.';
+  return t;
+}
+async function claudeSemana(){
+  const p = pacienteActual(); if (!p) return;
+  const t = textoClaude(p);
+  try { if (navigator.clipboard) await navigator.clipboard.writeText(t); } catch(e){}
+  window.open('https://claude.ai/new?q='+encodeURIComponent(t), '_blank');
+  setMsg('Texto copiado. Se abre Claude con la pregunta; si no aparece, pégalo allí.', true); render();
+}
+function dlgComida(){
+  const sl = S.slot, p = pacienteActual(); if (!sl || !p) return;
+  const m = S.menu[sl.d].meals[sl.m]; if (!m || !m.rid) { dlgSlot(); return; }
+  const v = valsComida(m), e = estMeal(m);
+  let h = '<h2>'+esc(DIAS[sl.d])+' · '+esc(m.slot)+'</h2>' +
+    '<div class="card" style="margin-bottom:12px"><p class="sub">Plan</p><b style="font-size:19px">'+esc(m.name)+'</b><p class="sub">×'+kgTxt(Math.round(m.s*100)/100)+' · '+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p><p style="margin-top:6px">'+chip(e)+'</p>' +
+    (e === 'cambio' ? '<p class="sub" style="margin-top:6px">Comido: <b>'+esc(m.real.name)+'</b> · '+macTxt(valsComida(m.real))+'</p>' : '') + '</div>' +
+    '<button class="btn" style="margin-bottom:10px" data-act="marcaHecho">✅ Lo he hecho</button>' +
+    '<button class="btn secondary" style="margin-bottom:10px" data-act="marcaNo">✖ No lo he hecho</button>' +
+    '<button class="btn secondary" style="margin-bottom:10px" data-act="realDlg">🔁 He comido otra cosa</button>' +
+    '<button class="btn secondary" style="margin-bottom:10px" data-act="slotMenu" data-d="'+sl.d+'" data-m="'+sl.m+'">🔄 Cambiar el plato del menú</button>' +
+    (e !== 'pend' ? '<button class="btn ghost" style="margin-bottom:10px" data-act="marcaPend">↩ Volver a pendiente</button>' : '') +
+    '<button class="btn ghost" data-act="cerrar">Cerrar</button>';
+  abrirDlg(h);
+}
+async function marcarComida(fn, texto){
+  const sl = S.slot; if (!sl) return;
+  const m = S.menu[sl.d].meals[sl.m]; fn(m);
+  const ad = ajusteDia(pacienteActual(), sl.d);
+  cerrarDlg(); setMsg((texto || '') + (ad && ad.alerta ? ' ⚠ '+ad.msgs.join(' · ')+'.' : ''), !(ad && ad.alerta)); render(); await guardarMenu();
+}
 function vMenu(p){
   if (!S.levels || !S.levels.some(x => x)) return '';
   if (!datosOk(p)) return '';
   const hay = S.menu && S.menu.some(d => d.meals && d.meals.length);
+  if (hay && S.mdia !== null && S.mdia !== undefined) {
+    if (S.mdia === 'semana') return vSemanaMenu(p);
+    if (S.menu[S.mdia] && S.menu[S.mdia].meals && S.menu[S.mdia].meals.length) return vDiaMenu(p, S.mdia);
+    S.mdia = null;
+  }
   let html = '<div class="card"><h3>Menú de la semana</h3>' +
-    '<p class="sub" style="margin-bottom:10px">'+(hay ? 'Toca una comida para cambiar la receta o la ración.' : 'La app propone una receta para cada comida, con la ración ajustada a las kcal y macros del día.')+'</p>' +
+    '<p class="sub" style="margin-bottom:10px">'+(hay ? 'Toca un día para ver sus comidas.' : 'La app propone una receta para cada comida, con la ración ajustada a las kcal y macros del día.')+'</p>' +
     '<div class="btn-row"><button class="btn secondary" data-act="repartoDlg">Reparto</button><button class="btn secondary" data-act="copiarSemana">📋 Copiar de otra semana</button></div>' +
     '<button class="btn secondary" style="margin-top:10px" data-act="fijasDlg">📌 Comidas fijas'+(() => { const f = fijasDe(p), n = Object.keys(f).filter(k => f[k] && f[k].rid).length; return n ? ' ('+n+(fijasPropias(p) ? '' : ', por defecto')+')' : ''; })()+'</button></div>';
   const fte = fuenteDe(p), enl = S.patients.some(x => x.id !== p.id);
@@ -605,24 +874,8 @@ function vMenu(p){
     (enl ? '<button class="btn ghost" style="margin-top:10px" data-act="modoMenuDlg">🔗 Enlace del menú: '+(esCopia(p) && fte ? 'copia de '+esc(fte.name) : 'propio')+'</button>' : '') +
     (hay ? '<button class="btn secondary" style="margin-top:10px" data-act="ptab" data-v="informe">Ver la tabla</button>' : '') + '</div>';
   if (!hay) return html + vMacros(p) + btnGen;
-  html += DIAS.map((d, i) => {
-    const dia = S.menu[i]; if (!dia || !dia.meals || !dia.meals.length) return '';
-    const obj = objetivoDia(p, i), tot = totalDia(dia);
-    const filas = dia.meals.map((m, j) => {
-      if (!m.rid) return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b><p class="sub">Sin receta · toca para elegir</p></div><span class="chev">＋</span></button>';
-      const v = valsComida(m);
-      let real = '';
-      if (m.real) { const rv = valsReal(m);
-        real = '<p class="sub" style="color:var(--t-accent2);font-weight:700">🔁 Comido: '+(m.real.none ? 'nada' : esc(m.real.name)+' · ×'+kgTxt(Math.round(m.real.s*100)/100)+' · '+Math.round(rv.kcal)+' kcal · P '+r1(rv.prot)+' · C '+r1(rv.carb)+' · G '+r1(rv.fat))+'</p>' +
-          '<p class="sub">Variación: '+txtVariacion(v, rv)+'</p>'; }
-      return '<button class="row" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'"><div class="grow"><b>'+esc(m.slot)+'</b>'+(m.fija ? ' 📌' : '')+' · '+esc(m.name)+
-        '<p class="sub">'+(m.real ? 'Planificado: ' : '')+'ración ×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+' · '+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p>'+real+'</div><span class="chev">›</span></button>';
-    }).join('');
-    return '<div class="card"><h3 style="margin-bottom:2px">'+d+' · '+NIVELES[S.levels[i]-1]+'</h3>' +
-      '<p class="sub" style="margin-bottom:8px">Total '+Math.round(tot.kcal)+' de '+(obj ? obj.kcal : '?')+' kcal · P '+Math.round(tot.prot)+'/'+(obj ? obj.prot : '?')+' · C '+Math.round(tot.carb)+'/'+(obj ? obj.carb : '?')+' · G '+Math.round(tot.fat)+'/'+(obj ? obj.fat : '?')+'</p>' +
-      (hayReal(dia) ? (() => { const rt = totalReal(dia); return '<p class="sub" style="margin:-4px 0 8px;color:var(--t-accent2);font-weight:700">Real: '+Math.round(rt.kcal)+' kcal · P '+Math.round(rt.prot)+' · C '+Math.round(rt.carb)+' · G '+Math.round(rt.fat)+' ('+txtVariacion(tot, rt)+')</p>'; })() : '') +
-      '<div class="list">'+filas+'</div><button class="btn secondary" style="margin-top:10px" data-act="addExtra" data-d="'+i+'">＋ Añadir un plato adicional</button></div>';
-  }).join('');
+  html += '<h3 style="margin:14px 0 8px">Días de la semana</h3><div class="list">' + DIAS.map((d, i) => tarjetaDia(p, i)).join('') +
+    '<button class="row" data-act="diaMenu" data-d="semana"><div class="grow"><b>📊 Semana</b><p class="sub">Totales de la semana y cómo va el equilibrio</p></div><span class="chev">›</span></button></div>';
   return html + btnGen;
 }
 function dlgSlot(){
@@ -634,7 +887,9 @@ function dlgSlot(){
   const delDia = {}; dia.meals.forEach(x => { if (x.rid && x !== m) delDia[x.rid] = true; });
   const q = norm(S.slotQ || '');
   const base = q ? S.recipes.filter(r => (r.kcal||0) > 0 && norm([r.name, r.useIn, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0) : candidatas(m.slot);
-  const cands = (t ? base.map(r => ({r, sc:puntua(r, t, usos, null, delDia)})).sort((a,b) => a.sc - b.sc).map(x => x.r) : base).slice(0, q ? 30 : 10);
+  const vAct = m.rid ? valsComida(m) : null, simDe = r => vAct ? similitud(r, vAct) : null;
+  const cands = (vAct && !q ? base.filter(r => r.id !== m.rid).map(r => ({r, sim:simDe(r)})).sort((a, b) => b.sim - a.sim).map(x => x.r)
+    : (t ? base.map(r => ({r, sc:puntua(r, t, usos, null, delDia)})).sort((a,b) => a.sc - b.sc).map(x => x.r) : base)).slice(0, q ? 30 : 10);
   let cabecera = '<h2>'+DIAS[sl.d]+' · '+esc(m.slot)+'</h2>';
   if (t) cabecera += '<p class="sub" style="margin-bottom:12px">Objetivo de esta comida: '+Math.round(t.kcal)+' kcal · P '+Math.round(t.prot)+' · C '+Math.round(t.carb)+' · G '+Math.round(t.fat)+'</p>';
   let actual = '';
@@ -647,10 +902,10 @@ function dlgSlot(){
   const buscador = '<div class="field"><label class="f" for="sq">Buscar receta</label><input id="sq" type="search" value="'+esc(S.slotQ||'')+'" placeholder="Nombre o ingrediente…" autocomplete="off"></div>';
   const sinKcal = S.recipes.filter(r => !(r.kcal > 0)).length;
   const lista = buscador + '<button class="btn secondary" style="margin-bottom:10px" data-act="recetaDesdeSlot">＋ Añadir receta a mano</button>' +
-    (sinKcal ? '<p class="sub" style="margin-bottom:10px">⚠ '+sinKcal+' receta'+(sinKcal>1?'s':'')+' sin calorías no sale'+(sinKcal>1?'n':'')+' aquí. Ábrela'+(sinKcal>1?'s':'')+' en el Recetario y pulsa «Calcular macros».</p>' : '') + (cands.length ? '<h3 style="margin:6px 0">'+(q ? 'Resultados' : 'Recetas que encajan')+'</h3><div class="list">' + cands.filter(r => r.id !== m.rid).map(r => {
+    (sinKcal ? '<p class="sub" style="margin-bottom:10px">⚠ '+sinKcal+' receta'+(sinKcal>1?'s':'')+' sin calorías no sale'+(sinKcal>1?'n':'')+' aquí. Ábrela'+(sinKcal>1?'s':'')+' en el Recetario y pulsa «Calcular macros».</p>' : '') + (cands.length ? '<h3 style="margin:6px 0">'+(q ? 'Resultados' : vAct ? 'Platos parecidos a este' : 'Recetas que encajan')+'</h3><div class="list">' + cands.filter(r => r.id !== m.rid).map(r => {
     const s = t ? escalaPara(r, t) : 1;
-    return '<button class="row" data-act="elegirReceta" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(s)+' · '+Math.round(r.kcal*s)+' kcal · P '+r1(r.prot*s)+' · C '+r1(r.carb*s)+' · G '+r1(r.fat*s)+'</p></div><span class="chev">›</span></button>';
-  }).join('') + '</div>' : '<div class="empty">'+(q ? 'Ninguna receta coincide.' : 'No hay recetas para esta comida. Añade recetas en el Recetario.')+'</div>');
+    return '<button class="row" data-act="elegirReceta" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b>'+(vAct ? ' <span style="font-weight:800;color:var(--t-accent)">'+simDe(r)+' % similar</span>' : '')+'<p class="sub">ración ×'+kgTxt(s)+' · '+Math.round(r.kcal*s)+' kcal · P '+r1(r.prot*s)+' · C '+r1(r.carb*s)+' · G '+r1(r.fat*s)+'</p></div><span class="chev">›</span></button>';
+  }).join('') + '</div>' : '<div class="empty">'+(q ? 'Ninguna receta coincide.' : /^Postre/.test(m.slot) ? 'No hay recetas de postre. Crea una en el Recetario y marca «Postre» en «Utilizar en».' : 'No hay recetas para esta comida. Añade recetas en el Recetario.')+'</div>');
   const botonReal = m.rid ? '<button class="btn secondary" style="margin-bottom:12px" data-act="realDlg">🔁 Cambio sobre la marcha'+(m.real ? ' (registrado)' : '')+'</button>' : '';
   abrirDlg(cabecera + actual + botonReal + lista + '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
 }
@@ -677,7 +932,7 @@ async function cambiarSlot(fn, cerrar, aviso, reabrir){
   const sl = S.slot; if (!sl) return;
   const antes = totalDia(S.menu[sl.d]);
   fn(S.menu[sl.d].meals[sl.m]);
-  if (esCopia(pacienteActual())) S.menu[sl.d].meals[sl.m].manual = true;
+  if (esCopia(pacienteActual()) && reabrir !== dlgReal) S.menu[sl.d].meals[sl.m].manual = true;
   { const des = totalDia(S.menu[sl.d]); if (Math.abs(des.kcal - antes.kcal) + Math.abs(des.prot - antes.prot) + Math.abs(des.carb - antes.carb) + Math.abs(des.fat - antes.fat) > 0.5) {
     const pp = pacienteActual(), ob = pp && objetivoDia(pp, sl.d);
     aviso = (aviso || DIAS[sl.d]+' · '+S.menu[sl.d].meals[sl.m].slot+':') + ' Variación del día: '+txtVariacion(antes, des)+'. El día queda en '+fmtN(des.kcal)+(ob ? ' de '+ob.kcal : '')+' kcal · P '+Math.round(des.prot)+(ob ? '/'+ob.prot : '')+' · C '+Math.round(des.carb)+(ob ? '/'+ob.carb : '')+' · G '+Math.round(des.fat)+(ob ? '/'+ob.fat : '')+'.'; } }
@@ -734,7 +989,7 @@ function dlgReparto(){
 }
 async function guardarReparto(){
   const p = pacienteActual(); if (!p) return;
-  const v = [0,1,2,3,4].map(i => parseInt($('#rp'+i).value, 10) || 0);
+  const v = repartoDe(p).map((x, i) => parseInt($('#rp'+i).value, 10) || 0);
   if (v.some(x => x < 0 || x > 100) || v.reduce((a,b) => a+b, 0) !== 100) { $('#rp_msg').textContent = 'Los porcentajes deben sumar 100 (ahora suman '+v.reduce((a,b) => a+b, 0)+').'; return; }
   try { await refPac(p.id).update({reparto:v}); p.reparto = v; cerrarDlg(); setMsg('Reparto guardado. Vuelve a proponer el menú para aplicarlo.', true); }
   catch(e){ $('#rp_msg').textContent = 'No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'; return; }
@@ -898,7 +1153,7 @@ function compraSemana(){
   const ing = {}, platos = {};
   (S.menu || []).forEach(dia => (dia && dia.meals || []).forEach(m => {
     if (!m.rid) return;
-    const r = recetaPorId(m.rid); if (!r) return;
+    const r = m.alimento ? {name:m.name, servings:1, ingredients:m.ing || []} : recetaPorId(m.rid); if (!r) return;
     platos[r.name] = (platos[r.name] || 0) + 1;
     const f = (m.s || 1) / Math.max(r.servings || 1, 1);
     // los ingredientes de la receta están escritos para TODAS las raciones; la comida usa m.s raciones
@@ -1037,16 +1292,13 @@ function vCompraTab(p){
   return cabSemana() + msgHtml() + (c || '<div class="card"><p class="sub">Esta semana aún no hay menú, así que no hay nada que comprar.</p></div>') +
     '<button class="btn secondary" data-act="compraCerrar">Ocultar la lista de la compra</button>';
 }
-function vInforme(p){
+function vResumenSem(p){
   let h = cabSemana() + msgHtml();
-  if (S.menu && S.menu.some(d => d && d.meals && d.meals.some(m => m.rid))) {
-    h += '<div class="card"><h3>Menú de la semana</h3><p class="sub" style="margin-bottom:8px">Toca una comida para cambiarla. Abajo de cada día ves cómo queda frente al objetivo y cuánto ha cambiado desde que se generó el menú.</p>' + tablaMenuApp(p) +
-      '<div class="btn-row" style="margin-top:12px"><button class="btn secondary" data-act="compraAbrir">🛒 Lista de la compra</button><button class="btn" data-act="pdfAbrir">📄 Ver informe PDF</button></div></div>';
-  }
-  if (!datosOk(p)) return h + '<div class="card"><p class="sub">Para calcular hace falta sexo, año de nacimiento, altura y un peso. Complétalo en Resumen.</p></div>';
+  if (!datosOk(p)) return h + '<div class="card"><p class="sub">Para calcular hace falta sexo, año de nacimiento, altura y un peso. Complétalo en Datos.</p></div>';
   if (!S.levels || !S.levels.some(x => x)) return h + '<div class="card"><p class="sub">Esta semana aún no tiene niveles de entreno. Ponlos en la pestaña Entreno.</p></div>';
   const ds = datosSemana(p), rs = resumenSemana(ds), kg = kgDe(), hayR = ds.some(d => d.real);
-  if (!rs.nMenu) return h + '<div class="card"><p class="sub" style="margin-bottom:10px">Esta semana aún no tiene menú. Genéralo en la pestaña Menú y aquí verás la tabla y los gráficos.</p><button class="btn" data-act="ptab" data-v="menu">Ir a Menú</button></div>';
+  if (!rs.nMenu) return h + '<div class="card"><p class="sub" style="margin-bottom:10px">Esta semana aún no tiene menú. Genéralo en la pestaña Menú y aquí verás el resumen y los gráficos.</p><button class="btn" data-act="ptab" data-v="menu">Ir a Menú</button></div>';
+  h += eqCard(p);
   const bal = rs.balance, grasa = Math.abs(bal)/7.7;
   const colBal = Math.abs(bal) < 700 ? 'var(--t-good-fg)' : 'var(--t-chg-fg)';
   h += '<div class="card"><h3>Resumen de la semana</h3><div style="display:flex;flex-wrap:wrap;gap:8px">' +
@@ -1059,6 +1311,13 @@ function vInforme(p){
     '<div style="margin-top:10px">'+tablaCifras(ds, PAL_APP)+'</div></div>';
   h += '<div class="card"><h3>Macros: necesarios y en el menú</h3>' + barrasMacros(ds, PAL_APP, kg) + '</div>';
   h += '<div class="card"><h3>Macros día a día</h3>' + chartMacrosDia(ds, PAL_APP) + leyendaMacros(PAL_APP) + '</div>';
+  return h;
+}
+function vInforme(p){
+  let h = cabSemana() + msgHtml();
+  const hayMenu = S.menu && S.menu.some(d => d && d.meals && d.meals.some(m => m.rid));
+  if (!hayMenu) return h + '<div class="card"><p class="sub" style="margin-bottom:10px">Esta semana aún no tiene menú. Genéralo en la pestaña Menú.</p><button class="btn" data-act="ptab" data-v="menu">Ir a Menú</button></div>';
+  h += '<div class="card"><h3>Lista de la compra</h3><p class="sub" style="margin-bottom:10px">Con las recetas y raciones del menú de esta semana.</p><button class="btn secondary" data-act="compraAbrir">🛒 Abrir la lista de la compra</button></div>';
   h += '<div class="card"><h3>Informe en PDF</h3><p class="sub" style="margin-bottom:8px">Notas para el usuario: aparecerán en el informe, junto a las pautas automáticas.</p>' +
     '<div class="field"><label class="f" for="notas">Notas del nutricionista (esta semana)</label><textarea id="notas" rows="5" style="padding:12px 14px;line-height:1.4">'+esc(S.notas || '')+'</textarea></div>' +
     '<div class="btn-row"><button class="btn secondary" data-act="guardarNotas">Guardar notas</button><button class="btn" data-act="pdfAbrir">📄 Ver informe</button></div></div>';
@@ -1077,7 +1336,8 @@ function vEntreno(p){
 function vMenuTab(p){
   const hayNiv = S.levels && S.levels.some(x => x);
   if (!hayNiv) return cabSemana() + msgHtml() + '<div class="card"><h3>Menú de la semana</h3><p class="sub" style="margin-bottom:12px">Para preparar el menú necesito saber la intensidad de entreno de cada día de esta semana.</p><button class="btn" data-act="ptab" data-v="entreno">Ir a Entreno</button></div>';
-  return cabSemana() + msgHtml() + vObjetivo(p) + vMenu(p);
+  const enDia = S.mdia !== null && S.mdia !== undefined && S.menu && S.menu.some(d => d && d.meals && d.meals.length);
+  return cabSemana() + msgHtml() + (enDia ? '' : vObjetivo(p)) + vMenu(p);
 }
 function norm(t){ return String(t||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
 const macrosTxt = r => (r.kcal||0)+' kcal · P '+kgTxt(r.prot||0)+' · C '+kgTxt(r.carb||0)+' · G '+kgTxt(r.fat||0);
@@ -1317,7 +1577,7 @@ async function cargarSemana(){
   S.notas = d.exists && typeof d.data().notes === 'string' ? d.data().notes : '';
 }
 async function abrirPaciente(id){
-  S.pid = id; S.tab = 'pacientes'; S.ptab = 'menu'; S.compraOn = false; S.menuBase = null; S.weights = []; S.measures = []; S.levels = null; S.menu = null; S.weekStart = lunesISO(new Date()); setMsg(null);
+  S.mdia = null; S.pid = id; S.tab = 'pacientes'; S.ptab = 'menu'; S.compraOn = false; S.menuBase = null; S.weights = []; S.measures = []; S.levels = null; S.menu = null; S.weekStart = lunesISO(new Date()); setMsg(null);
   render();
   const l0 = linkDe(id); if (l0 && l0.status === 'accepted') await leerWorkOut(id);
   try { await cargarPesos(); } catch(e){ setMsg('No se pudo leer el peso (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('pesos', e); }
@@ -1372,7 +1632,7 @@ async function ponerNivel(dia, nivel){
   catch(e){ setMsg('No se pudo guardar la semana. Inténtalo de nuevo.', false); render(); }
 }
 async function cambiarSemana(n){
-  S.weekStart = sumaDias(S.weekStart, n); S.levels = null; S.menu = null; S.menuBase = null; setMsg(null); render();
+  S.mdia = null; S.weekStart = sumaDias(S.weekStart, n); S.levels = null; S.menu = null; S.menuBase = null; setMsg(null); render();
   try { await cargarSemana(); } catch(e){ setMsg('No se pudo leer la semana (' + ((e && (e.code || e.message)) || 'error') + ').', false); console.error('semana', e); }
   render();
 }
@@ -1438,7 +1698,7 @@ function filtraSelect(inp){
   sel.innerHTML = '<option value="">'+esc(q && !lista.length ? 'Ninguna receta coincide' : inp.dataset.vacio)+'</option>' + lista.map(x => '<option value="'+esc(x[0])+'"'+(x[0] === actual ? ' selected' : '')+'>'+esc(x[1])+'</option>').join('');
   sel.value = actual;
 }
-const USOS = [['Desayuno','desayun'],['Media mañana','media|snack'],['Almuerzo','almuerz|comida'],['Merienda','merienda'],['Cena','cena']];
+const USOS = [['Postre','postre'],['Desayuno','desayun'],['Media mañana','media|snack'],['Almuerzo','almuerz|comida'],['Merienda','merienda'],['Cena','cena']];
 const usosDe = txt => { const u = norm(txt || ''); return USOS.filter(x => new RegExp(x[1]).test(u)).map(x => x[0]); };
 function usoResumen(){ const v = $$('.uso-ck').filter(c => c.checked).map(c => c.value); return v.length ? v.join(', ') : 'Elige una o varias comidas'; }
 function usoHtml(valor){
@@ -1799,6 +2059,17 @@ document.addEventListener('click', e => {
         const s = obj && !m0.extra ? escalaPara(r, {kcal:obj.kcal*pct/100}) : 1;
         cambiarSlot(m => Object.assign(m, comidaDe(r, m.slot, s), {fija:false}), true, DIAS[sl.d]+' · '+m0.slot+': cambiado a '+r.name+'.'); } break; }
     case 'buscarSolic': cargarSolicitudes().then(render); break;
+    case 'eqDlg': S.eqSel = null; S.eqProp = null; if (t.dataset.d !== undefined && t.dataset.d !== '') { const dd = parseInt(t.dataset.d, 10); S.eqSel = null; } dlgEquilibrio(); break;
+    case 'eqCalc': eqCalc(); break;
+    case 'eqAplicar': eqAplicar(); break;
+    case 'claudeSemana': claudeSemana(); break;
+    case 'realLibre': realLibre(); break;
+    case 'diaMenu': setMsg(null); S.mdia = t.dataset.d === '' ? null : t.dataset.d === 'semana' ? 'semana' : parseInt(t.dataset.d, 10); render(); window.scrollTo(0, 0); break;
+    case 'comidaDlg': S.slot = {d:parseInt(t.dataset.d,10), m:parseInt(t.dataset.m,10)}; dlgComida(); break;
+    case 'marcaHecho': marcarComida(m => { m.estado = 'hecho'; delete m.real; }, 'Comida marcada como hecha.'); break;
+    case 'marcaNo': marcarComida(m => { delete m.estado; m.real = {none:true}; }, 'Comida marcada como no hecha.'); break;
+    case 'marcaPend': marcarComida(m => { delete m.estado; delete m.real; }, 'Comida otra vez pendiente.'); break;
+    case 'addCompl': addComplemento(parseInt(t.dataset.d, 10), t.dataset.n, parseInt(t.dataset.g, 10)); break;
     case 'equipoAnadir': equipoCambiar($('#eq_mail') ? $('#eq_mail').value : '', true); break;
     case 'equipoQuitar': equipoCambiar(t.dataset.e, false); break;
     case 'rgrp': S.rgrp = t.dataset.v; render(); break;
