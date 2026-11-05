@@ -44,7 +44,7 @@ Object.keys(EXTRA_FOODS).forEach(k => { if (!D.FOOD_DB[k]) D.FOOD_DB[k] = EXTRA_
    OFF = Open Food Facts (etiqueta de producto de Mercadona/Hacendado u otra marca, por 100 g tal como se vende).
    Estos valores sustituyen a los de la tabla anterior cuando el alimento ya existía. */
 const FUENTES_ALIM = {
-  "nuez": [716,17,2.2,69.6,4,"Mercadona (nueces sin cáscara)"], "nueces": [716,17,2.2,69.6,4,"Mercadona (nueces sin cáscara)"],
+  "nuez": [716,17,2.2,69.6,4,"Mercadona (nueces sin cáscara)"], "nueces": [716,17,2.2,69.6,4,"Mercadona (nueces sin cáscara)"], "yogur griego ligero": [60,5.8,4.7,2,125,"Mercadona Hacendado (yogur natural al estilo griego ligero)"], "yogur griego": [60,5.8,4.7,2,125,"Mercadona Hacendado (yogur natural al estilo griego ligero)"], "yogur al estilo griego": [60,5.8,4.7,2,125,"Mercadona Hacendado (yogur natural al estilo griego ligero)"], 
   /* ---- FEN: frescos ---- */
   "pechuga de pollo": [112,21.8,0,2.8,null,"FEN"], "pollo": [167,20,0,9.7,null,"FEN (pollo entero)"], "merluza": [89,15.9,0,2.8,null,"FEN"],
   "salmon": [182,18.4,0,12,null,"FEN"], "sardina": [140,18.1,0,7.5,80,"FEN"], "caballa": [150,15,0,10,null,"FEN"], "sepia": [71,16.1,0,0.7,null,"FEN"],
