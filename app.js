@@ -232,6 +232,12 @@ function compsDe(p){
   return out.filter(c => c.date).sort((a,b) => a.date < b.date ? -1 : 1);
 }
 const compsProximas = p => compsDe(p).filter(c => c.date >= iso(new Date()));
+/* Fecha objetivo del peso: la que se haya puesto a mano; si no, la competición más próxima. */
+function fechaObjetivo(p){
+  if (p.targetDate) return {date:p.targetDate, comp:false};
+  const c = compsProximas(p).sort((a, b) => a.date < b.date ? -1 : 1)[0];
+  return c ? {date:c.date, comp:true, name:c.name} : {date:'', comp:false};
+}
 function diasCompeticion(pid){
   const p = S.patients.find(x => x.id === pid), out = {};
   (p ? compsDe(p) : []).forEach(c => { out[c.date] = true; out[sumaDias(c.date, -1)] = true; });
@@ -260,7 +266,7 @@ function planSemana(p){
   const lv = S.levels, kg = kgDe();
   if (!lv || !lv.some(x => x) || !kg || !datosOk(p)) return null;
   const comp = diasCompeticion(p.id), obj = tipoObjetivo(p);
-  const clave = [p.id, S.weekStart, lv.join(''), kg, obj, p.rateKg || '', p.targetKg || '', p.targetDate || '', p.heightCm, p.birthYear, p.sex, Object.keys(comp).sort().join(',')].join('|');
+  const clave = [p.id, S.weekStart, lv.join(''), kg, obj, p.rateKg || '', p.targetKg || '', fechaObjetivo(p).date, p.heightCm, p.birthYear, p.sex, Object.keys(comp).sort().join(',')].join('|');
   if (_planCache.k === clave) return _planCache.v;
   const reposo = reposoDe(p, kg), dias = [];
   for (let i = 0; i < 7; i++) {
@@ -271,7 +277,7 @@ function planSemana(p){
     dias.push({nivel, mant, cap});
   }
   const capacidad = dias.reduce((a, d) => a + d.cap, 0);
-  const meta = parseFloat(p.targetKg), fObj = p.targetDate || '';
+  const meta = parseFloat(p.targetKg), fObj = fechaObjetivo(p).date;
   let ritmoPedido, semRest = null, fechaPasada = false;
   if (obj !== 'mantener' && meta > 0 && fObj) {
     // El ritmo sale de la fecha: kilos que faltan entre las semanas que quedan (desde el lunes de la semana que se ve).
@@ -314,9 +320,9 @@ function vObjetivo(p){
   const n1 = x => (Math.round(x*100)/100).toLocaleString('es-ES');
   let h = '<div class="card"><h3>Objetivo: '+nombre+'</h3>';
   if (obj === 'mantener') return h + '<p class="sub">Las kcal de cada día son iguales a lo que gasta. No hay déficit ni superávit.</p></div>';
-  if (pl.fechaPasada) return h + '<p class="sub" style="color:var(--t-chg-fg)">La fecha objetivo ('+fechaCorta(p.targetDate)+') ya está encima o ha pasado. Cambia la fecha en «Editar usuario».</p></div>';
-  if (pl.porFecha) h += '<p style="margin:0 0 6px">Meta: <b>'+kgTxt(meta)+' kg</b> el <b>'+fechaCorta(p.targetDate)+'</b>. Tienes <b>'+kgTxt(kg)+' kg</b> y quedan unas <b>'+Math.round(pl.semRest)+' semanas</b>: hace falta '+(obj === 'bajar' ? 'bajar' : 'subir')+' <b>'+n1(pl.ritmoPedido)+' kg/semana</b> ('+fmtN(pl.pedido)+' kcal a la semana).</p>';
-  else h += '<p style="margin:0 0 6px">'+(meta ? 'De <b>'+kgTxt(kg)+' kg</b> a <b>'+kgTxt(meta)+' kg</b> · ' : '')+'ritmo previsto <b>'+n1(pl.ritmoPedido)+' kg/semana</b> ('+fmtN(pl.pedido)+' kcal a la semana). Pon una fecha objetivo en «Editar usuario» y el ritmo se calcula solo.</p>';
+  if (pl.fechaPasada) return h + '<p class="sub" style="color:var(--t-chg-fg)">La fecha objetivo ('+fechaCorta(fechaObjetivo(p).date)+') es esta semana o ya ha pasado, así que no se recorta nada. Cuando termine, elige una fecha nueva en «Editar usuario» (o espera a la siguiente competición).</p></div>';
+  if (pl.porFecha) h += '<p style="margin:0 0 6px">Meta: <b>'+kgTxt(meta)+' kg</b> el <b>'+fechaCorta(fechaObjetivo(p).date)+'</b>'+(fechaObjetivo(p).comp ? ' (competición «'+esc(fechaObjetivo(p).name)+'»)' : '')+'. Tienes <b>'+kgTxt(kg)+' kg</b> y quedan unas <b>'+Math.round(pl.semRest)+' semanas</b>: hace falta '+(obj === 'bajar' ? 'bajar' : 'subir')+' <b>'+n1(pl.ritmoPedido)+' kg/semana</b> ('+fmtN(pl.pedido)+' kcal a la semana).</p>';
+  else h += '<p style="margin:0 0 6px">'+(meta ? 'De <b>'+kgTxt(kg)+' kg</b> a <b>'+kgTxt(meta)+' kg</b> · ' : '')+'ritmo previsto <b>'+n1(pl.ritmoPedido)+' kg/semana</b> ('+fmtN(pl.pedido)+' kcal a la semana). Si hay una competición próxima o pones una fecha objetivo en «Editar usuario», el ritmo se calcula solo.</p>';
   if (pl.capacidad < 1) return h + '<p class="sub" style="color:var(--t-chg-fg)">Esta semana no hay días que admitan déficit (solo Descanso y Baja, y sin competición). Con tanta carga no se puede bajar peso sin quitar energía al entreno.</p></div>';
   h += '<p style="margin:0 0 6px">Esta semana cabe: <b>'+n1(pl.ritmo)+' kg/semana</b> ('+fmtN(pl.aplicado)+' kcal) repartidos en '+pl.diasConDeficit+' día'+(pl.diasConDeficit === 1 ? '' : 's')+' de '+(obj === 'bajar' ? 'Descanso/Baja' : 'la semana')+'.</p>';
   if (pl.limitado) h += '<p class="sub" style="color:var(--t-chg-fg)">⚠ Ese ritmo no cabe sin tocar los días de entreno. Más días de Descanso o Baja, o una fecha más lejana, lo harían posible. Los días de carga se mantienen siempre a mantenimiento.</p>';
@@ -1220,7 +1226,7 @@ function explicacionSemana(p, ds, rs){
   trozos.push('El gasto estimado parte del metabolismo en reposo ('+fmtN(reposo)+' kcal, fórmula de Mifflin-St Jeor con '+kgTxt(kg)+' kg) multiplicado por un factor según el nivel del día: 1,2 · 1,375 · 1,55 · 1,725 (Descanso, Baja, Media, Alta).');
   trozos.push(obj === 'bajar' ? 'Como el objetivo es bajar peso, el déficit solo se aplica en los días de Descanso y Baja; en los días Medio, Alto y de competición se come lo que se gasta, de modo que el entreno no pierde energía.' : obj === 'subir' ? 'Como el objetivo es ganar peso, se añade un superávit del 10 % a todos los días.' : 'Como el objetivo es mantener, el objetivo diario coincide con el gasto estimado.');
   trozos.push('Los macros se calculan así: proteína 2 g/kg, grasa 1 g/kg (hasta 0,7 g/kg si hace falta) y el resto en carbohidratos, protegiendo un mínimo de 3 g/kg para el entreno.');
-  { const pl = planSemana(p); if (pl && pl.obj !== 'mantener') trozos.push('<b>Objetivo:</b> '+(pl.obj === "bajar" ? 'bajar' : 'subir')+(p.targetDate ? ' (fecha objetivo '+fechaCorta(p.targetDate)+') ' : '')+' a '+(Math.round(pl.ritmoPedido*100)/100).toLocaleString('es-ES')+' kg por semana'+(p.targetKg ? ' hasta '+kgTxt(parseFloat(p.targetKg))+' kg' : '')+'. Esta semana cabe '+(Math.round(pl.ritmo*100)/100).toLocaleString('es-ES')+' kg ('+fmtN(pl.aplicado)+' kcal repartidas en '+pl.diasConDeficit+' días de Descanso/Baja)'+(pl.limitado ? ': el ritmo pedido no cabe sin quitar energía a los días de entreno.' : '.')); }
+  { const pl = planSemana(p); if (pl && pl.obj !== 'mantener') trozos.push('<b>Objetivo:</b> '+(pl.obj === "bajar" ? 'bajar' : 'subir')+(fechaObjetivo(p).date ? ' (fecha objetivo '+fechaCorta(fechaObjetivo(p).date)+') ' : '')+' a '+(Math.round(pl.ritmoPedido*100)/100).toLocaleString('es-ES')+' kg por semana'+(p.targetKg ? ' hasta '+kgTxt(parseFloat(p.targetKg))+' kg' : '')+'. Esta semana cabe '+(Math.round(pl.ritmo*100)/100).toLocaleString('es-ES')+' kg ('+fmtN(pl.aplicado)+' kcal repartidas en '+pl.diasConDeficit+' días de Descanso/Baja)'+(pl.limitado ? ': el ritmo pedido no cabe sin quitar energía a los días de entreno.' : '.')); }
   if (rs.nMenu) trozos.push('El menú planificado aporta de media <b>'+fmtN(rs.menuMedio)+' kcal/día frente a un objetivo de '+fmtN(rs.objMedio)+'</b> (<b>'+Math.round(rs.cobertura*100)+' %</b> cubierto). Frente al gasto estimado, el balance semanal es de <b>'+(rs.balance >= 0 ? '+' : '−')+fmtN(Math.abs(rs.balance))+' kcal</b> (≈ '+(rs.balance >= 0 ? '+' : '−')+Math.round(Math.abs(rs.balance)/7.7)+' g de grasa).');
   return trozos.map(t => '<p>'+t+'</p>').join('');
 }
@@ -1435,6 +1441,14 @@ function setMsg(t, ok){ S.msg = t; S.msgOk = !!ok; }
 /* ---------- ventana emergente ---------- */
 function abrirDlg(html){ $('#dlgBody').innerHTML = html; $('#dlg').classList.add('open'); }
 function cerrarDlg(){ $('#dlg').classList.remove('open'); S.slotPend = null; }
+function selFechaObj(v){
+  const cs = v.id ? compsProximas(v).sort((a, b) => a.date < b.date ? -1 : 1) : [], td = v.targetDate || '';
+  const hay = cs.some(c => c.date === td);
+  let o = '<option value=""'+(!td ? ' selected' : '')+'>'+(cs.length ? 'Competición más próxima ('+fechaCorta(cs[0].date)+')' : 'Sin fecha (ritmo estándar)')+'</option>';
+  cs.forEach(c => { o += '<option value="'+c.date+'"'+(td === c.date ? ' selected' : '')+'>'+esc(c.name)+' · '+fechaCorta(c.date)+'</option>'; });
+  o += '<option value="otra"'+(td && !hay ? ' selected' : '')+'>Otra fecha…</option>';
+  return o;
+}
 function dlgPaciente(p){
   const v = p || {};
   abrirDlg('<h2>'+(p?'Editar usuario':'Nuevo usuario')+'</h2>' +
@@ -1444,7 +1458,7 @@ function dlgPaciente(p){
     '<div class="grid2"><div class="field"><label class="f" for="d_h">Altura (cm)</label><input id="d_h" inputmode="numeric" value="'+esc(v.heightCm||'')+'"></div>' +
     '<div class="field"><label class="f" for="d_gt">Objetivo de peso</label><select id="d_gt">'+[['mantener','Mantener'],['bajar','Bajar'],['subir','Subir']].map(o=>'<option value="'+o[0]+'"'+(o[0]===tipoObjetivo(v)?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></div></div>' +
     '<div class="grid2"><div class="field"><label class="f" for="d_tkg">Peso objetivo (kg)</label><input id="d_tkg" inputmode="decimal" value="'+esc(v.targetKg||'')+'" placeholder="Opcional"></div>' +
-    '<div class="field"><label class="f" for="d_tdate">Fecha objetivo</label><input id="d_tdate" type="date" value="'+esc(v.targetDate||'')+'"></div></div><p class="sub" style="margin:-4px 0 10px">Pon el peso y la fecha: la app calcula sola el ritmo semanal y lo ajusta cada semana con tu último peso.</p>' +
+    '<div class="field"><label class="f" for="d_tsel">Fecha objetivo</label><select id="d_tsel">'+selFechaObj(v)+'</select></div></div><div class="field" id="d_tdwrap" style="'+(selFechaObj(v).indexOf('value="otra" selected') >= 0 ? '' : 'display:none')+'"><label class="f" for="d_tdate">Otra fecha</label><input id="d_tdate" type="date" value="'+esc(v.targetDate||'')+'"></div><p class="sub" style="margin:-4px 0 10px">Por defecto es la competición más próxima. Con el peso y la fecha, la app calcula sola el ritmo semanal y lo ajusta cada semana con tu último peso.</p>' +
     '<div class="field"><label class="f" for="d_dom">Lado dominante</label><select id="d_dom">'+['','Derecho','Izquierdo'].map(o=>'<option'+(o===(v.dominant||'')?' selected':'')+' value="'+o+'">'+(o||'—')+'</option>').join('')+'</select></div>' +
     '<div class="field"><label class="f" for="d_goal">Objetivo (texto libre)</label><input id="d_goal" value="'+esc(v.goal||'')+'" placeholder="Opcional"></div>' +
     '<div class="field"><label class="f" for="d_notes">Notas</label><input id="d_notes" value="'+esc(v.notes||'')+'"></div>' +
@@ -1606,7 +1620,7 @@ async function guardarPaciente(id){
   if (h !== null && (h < 80 || h > 250)){ $('#d_msg').textContent = 'La altura debe estar entre 80 y 250 cm.'; return; }
   if (y !== null && (y < 1900 || y > new Date().getFullYear())){ $('#d_msg').textContent = 'Año de nacimiento no válido.'; return; }
   const dec = x => { const n = parseFloat(g(x).replace(',', '.')); return isFinite(n) && n > 0 ? n : null; };
-  const tk = dec('d_tkg'), td = g('d_tdate') || null, rt = null;
+  const tk = dec('d_tkg'), sel = g('d_tsel'), td = sel === 'otra' ? (g('d_tdate') || null) : (sel || null), rt = null;
   if (tk !== null && (tk < 30 || tk > 250)){ $('#d_msg').textContent = 'El peso objetivo debe estar entre 30 y 250 kg.'; return; }
   if (td && !tk){ $('#d_msg').textContent = 'Para usar una fecha objetivo escribe también el peso objetivo.'; return; }
   const datos = { name, sex:g('d_sex'), birthYear:y, heightCm:h, goal:g('d_goal'), goalType:g('d_gt'), notes:g('d_notes'), targetKg:tk, targetDate:td, rateKg:rt, dominant:g('d_dom') };
@@ -2116,6 +2130,7 @@ document.addEventListener('input', e => {
   if (e.target && e.target.id === 'rq2') { S.realQ = e.target.value; dlgReal(); const n = $('#rq2'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
   if (e.target && e.target.id === 'sq') { S.slotQ = e.target.value; dlgSlot(); const n = $('#sq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; } if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
 document.addEventListener('change', e => {
+  if (e.target && e.target.id === 'd_tsel') { const w = document.getElementById('d_tdwrap'); if (w) w.style.display = e.target.value === 'otra' ? '' : 'none'; }
   if (e.target && e.target.classList && e.target.classList.contains('uso-ck')) { const r = $('#r_usoRes'); if (r) r.firstChild.textContent = usoResumen(); return; }
   if (e.target && e.target.id === 'r_base') {
     const o = recetaPorId(e.target.value); if (!o) return;
