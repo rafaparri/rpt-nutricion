@@ -1410,6 +1410,8 @@ function vRecetario(){
     (S.rtab !== 'compartidas' && ['importada','manual','antigua'].filter(g => recetasDeGrupo(g).length).length > 1 ? '<div class="btn-row" style="margin-bottom:10px">' + [['','Todas'],['importada','📄 Word'],['manual','✍ A mano'],['antigua','Anteriores']].filter(x => !x[0] || recetasDeGrupo(x[0]).length).map(x => '<button class="btn '+((S.rgrp||'') === x[0] ? '' : 'secondary')+' small" data-act="rgrp" data-v="'+x[0]+'">'+x[1]+'</button>').join('') + '</div>' : '') +
     (S.rmsg ? '<div class="msg '+(S.rmsgOk?'ok':'err')+'">'+esc(S.rmsg)+'</div>' : '') + filas +
     '<div class="btn-row"><button class="btn" data-act="nuevaReceta">＋ Nueva receta</button><button class="btn secondary" data-act="importarWord">📄 Importar de Word</button></div>' +
+    '<button class="btn secondary" style="margin-top:10px" data-act="fotoAlim">📷 Añadir un alimento con foto'+((S.foods||[]).length ? ' ('+S.foods.length+' propios)' : '')+'</button>' +
+    ((S.foods||[]).length ? '<button class="btn ghost" style="margin-top:6px" data-act="misAlim">Ver mis alimentos</button>' : '') +
     '<button class="btn ghost" style="margin-top:10px" data-act="postresBase">🍎 Añadir postres básicos (fruta, yogur…)</button>' +
     (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar recetas… ('+S.recipes.length+')</button>' : '') +
     '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
@@ -1723,7 +1725,10 @@ async function cargarRecetas(){
   let mt = {docs:[]};
   try { mt = await db.collection('nu_recipes').where('teamEmails','array-contains',miEmail()).get(); } catch(e){ console.error('equipo recetas', e); }
   const mapa = {}; m.docs.concat(mt.docs).forEach(d => { mapa[d.id] = Object.assign({id:d.id}, d.data()); });
-  S.recipes = Object.keys(mapa).map(k => mapa[k]).sort(porNombre);
+  const todos = Object.keys(mapa).map(k => mapa[k]).sort(porNombre);
+  S.foods = todos.filter(r => r.tipoAlim);
+  S.recipes = todos.filter(r => !r.tipoAlim);
+  S.foods.forEach(f => { try { RPT_RECETAS.registrarAlimento(f.name, {kcal:f.kcal, prot:f.prot, carb:f.carb, fat:f.fat, peso:f.weight}); } catch(e){} });
   try {
     const c = await db.collection('nu_recipes').where('shared','==',true).get();
     S.sharedRecipes = c.docs.map(d => Object.assign({id:d.id}, d.data())).filter(r => r.ownerUid !== S.user.uid && r.ownerUid !== wsUid() && !S.recipes.some(x => x.id === r.id)).sort(porNombre);
@@ -1880,6 +1885,90 @@ async function postresBase(){
     setRmsg(n ? 'Añadidos '+n+' postres básicos. Puedes cambiarlos o borrarlos como cualquier receta.' : 'Ya tienes todos los postres básicos.', true);
   } catch(e){ setRmsg('No se pudieron añadir ('+((e && (e.code||e.message)) || 'error')+').', false); }
   render();
+}
+/* ---------- Alimentos propios: foto de la etiqueta ---------- */
+let _tess = null;
+function cargaTesseract(){
+  if (!_tess) _tess = import('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.esm.min.js').then(m => (m.createWorker ? m : (m.default || m)));
+  return _tess;
+}
+function lienzoDe(img, invertir){
+  const max = 2200, k = Math.min(1, max/Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth*k); c.height = Math.round(img.naturalHeight*k);
+  const x = c.getContext('2d'); x.drawImage(img, 0, 0, c.width, c.height);
+  const d = x.getImageData(0, 0, c.width, c.height), p = d.data;
+  for (let i = 0; i < p.length; i += 4) { let g = 0.3*p[i] + 0.59*p[i+1] + 0.11*p[i+2]; g = Math.max(0, Math.min(255, (g-128)*1.4 + 128)); if (invertir) g = 255 - g; p[i] = p[i+1] = p[i+2] = g; }
+  x.putImageData(d, 0, 0); return c;
+}
+function dlgFotoAlim(){
+  S.alimVal = null;
+  abrirDlg('<h2>Añadir un alimento</h2><p class="sub" style="margin-bottom:12px">Haz una foto a la tabla nutricional de la etiqueta (la que dice «por 100 g»). La app lee los números y tú los revisas antes de guardar.</p>' +
+    '<label class="btn" for="alimFoto" style="display:block;text-align:center;cursor:pointer">📷 Hacer foto o elegir imagen</label>' +
+    '<input id="alimFoto" type="file" accept="image/*" capture="environment" style="display:none">' +
+    '<div id="alimVista" style="margin:12px 0"></div><div class="msg" id="alimEstado"></div>' +
+    '<div class="field"><label class="f" for="a_name">Cómo lo escribirás en las recetas</label><input id="a_name" placeholder="Ej.: yogur griego" autocomplete="off"></div>' +
+    '<div class="grid2"><div class="field"><label class="f" for="a_kcal">kcal por 100 g</label><input id="a_kcal" inputmode="decimal"></div><div class="field"><label class="f" for="a_prot">Proteína (g)</label><input id="a_prot" inputmode="decimal"></div></div>' +
+    '<div class="grid2"><div class="field"><label class="f" for="a_carb">Hidratos (g)</label><input id="a_carb" inputmode="decimal"></div><div class="field"><label class="f" for="a_fat">Grasa (g)</label><input id="a_fat" inputmode="decimal"></div></div>' +
+    '<div class="field"><label class="f" for="a_peso">Peso de una unidad en gramos (opcional)</label><input id="a_peso" inputmode="decimal" placeholder="Ej.: 125 para un yogur"></div>' +
+    '<div class="msg err" id="a_msg"></div>' +
+    '<div class="btn-row"><button class="btn secondary" data-act="cerrar">Cancelar</button><button class="btn" data-act="guardarAlim">Guardar</button></div>');
+}
+async function leerFotoAlim(file){
+  const est = $('#alimEstado'), vista = $('#alimVista');
+  const url = URL.createObjectURL(file);
+  vista.innerHTML = '<img src="'+url+'" alt="Etiqueta" style="width:100%;max-height:260px;object-fit:contain;border-radius:12px;background:#000">';
+  est.className = 'msg'; est.textContent = 'Preparando la lectura… la primera vez tarda un poco más (descarga el lector).';
+  try {
+    const img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = ko; i.src = url; });
+    const T = await cargaTesseract();
+    const w = await T.createWorker('spa');
+    let mejor = null;
+    for (const inv of [false, true]) {
+      est.textContent = 'Leyendo la etiqueta ('+(inv ? '2' : '1')+' de 2)…';
+      const r = await w.recognize(lienzoDe(img, inv)), v = RPT_RECETAS.parseEtiqueta(r.data.text || '');
+      const pts = (v.cuadra ? 10 : 0) + (v.completo ? 5 : 0) + [v.kcal, v.prot, v.carb, v.fat].filter(x => x != null).length;
+      if (!mejor || pts > mejor.pts) mejor = {v, pts};
+      if (v.cuadra) break;
+    }
+    try { await w.terminate(); } catch(e){}
+    const v = mejor.v, set = (id, x) => { if (x != null) $('#'+id).value = String(x).replace('.', ','); };
+    set('a_kcal', v.kcal); set('a_prot', v.prot); set('a_carb', v.carb); set('a_fat', v.fat);
+    const hay = [v.kcal, v.prot, v.carb, v.fat].some(x => x != null);
+    if (!hay) { est.className = 'msg err'; est.textContent = 'No he podido leer los números. Escríbelos mirando la foto.'; }
+    else if (v.cuadra) { est.className = 'msg ok'; est.textContent = '✓ Leído y las kcal cuadran con los macros. Compruébalo con la foto y escribe el nombre.'; }
+    else { est.className = 'msg err'; est.textContent = '⚠ Revisa los números con la foto: '+(v.estimado ? 'no he podido leer una línea y la he calculado' : 'no cuadran del todo con las kcal')+'.'; }
+    if (!v.por100) est.textContent += ' Comprueba que la tabla es «por 100 g».';
+  } catch(e){
+    console.error('ocr', e);
+    est.className = 'msg err'; est.textContent = 'No he podido leer la foto automáticamente ('+((e && (e.message||e.code)) || 'error')+'). Escribe los números mirando la imagen.';
+  }
+}
+async function guardarAlim(){
+  const g = x => ($('#'+x).value || '').trim(), n = x => { const v = parseFloat(g(x).replace(',', '.')); return isFinite(v) ? v : null; };
+  const name = g('a_name'), kcal = n('a_kcal'), prot = n('a_prot'), carb = n('a_carb'), fat = n('a_fat'), peso = n('a_peso');
+  const err = t => { $('#a_msg').textContent = t; };
+  if (!name) return err('Escribe cómo lo vas a poner en las recetas (por ejemplo «yogur griego»).');
+  if ([kcal, prot, carb, fat].some(x => x === null || x < 0)) return err('Rellena kcal, proteína, hidratos y grasa por 100 g.');
+  if (kcal > 900 || prot > 100 || carb > 100 || fat > 100) return err('Hay algún número demasiado grande para 100 g. Revísalo.');
+  const at = 4*prot + 4*carb + 9*fat;
+  if (kcal > 0 && Math.abs(kcal - at)/kcal > 0.3 && !S.alimOk) { S.alimOk = true; return err('⚠ Las kcal ('+kcal+') no cuadran con los macros (P '+prot+' · C '+carb+' · G '+fat+' dan unas '+Math.round(at)+' kcal). Revisa los números o pulsa Guardar otra vez si son correctos.'); }
+  S.alimOk = false;
+  try {
+    await db.collection('nu_recipes').add({ownerUid:wsUid(), teamEmails:wsTeam(), ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now(), tipoAlim:true, origen:'alimento', name, kcal, prot, carb, fat, weight:peso || null, shared:false});
+    await cargarRecetas();
+    cerrarDlg(); setRmsg('Alimento «'+name+'» guardado. Ya puedes usarlo en las recetas: «100 g '+name+'».', true); render();
+  } catch(e){ err('No se pudo guardar ('+((e && (e.code||e.message)) || 'error')+').'); }
+}
+function dlgMisAlim(){
+  const l = S.foods || [];
+  abrirDlg('<h2>Mis alimentos</h2><p class="sub" style="margin-bottom:10px">Los has añadido tú (por 100 g). Sustituyen a los de la base si se llaman igual.</p>' +
+    (l.length ? '<div class="list">' + l.map(f => '<div class="row"><div class="grow"><b>'+esc(f.name)+'</b><p class="sub">'+Math.round(f.kcal)+' kcal · P '+kgTxt(f.prot)+' · C '+kgTxt(f.carb)+' · G '+kgTxt(f.fat)+(f.weight ? ' · unidad '+f.weight+' g' : '')+'</p></div><button class="btn danger small" data-act="borrarAlim" data-id="'+esc(f.id)+'">Borrar</button></div>').join('') + '</div>' : '<div class="empty">Todavía no has añadido ninguno.</div>') +
+    '<button class="btn secondary" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
+}
+async function borrarAlim(id){
+  try { await db.collection('nu_recipes').doc(id).delete(); await cargarRecetas(); setRmsg('Alimento borrado. Hasta que recargues la app seguirá reconocido en los cálculos.', true); }
+  catch(e){ setRmsg('No se pudo borrar ('+((e && (e.code||e.message)) || 'error')+').', false); }
+  dlgMisAlim(); render();
 }
 async function compartirReceta(id){
   const r = recetaPorId(id); if (!r) return;
@@ -2163,6 +2252,10 @@ document.addEventListener('click', e => {
     case 'rgrp': S.rgrp = t.dataset.v; render(); break;
     case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
     case 'verReceta': dlgVerReceta(t.dataset.id); break;
+    case 'fotoAlim': dlgFotoAlim(); break;
+    case 'misAlim': dlgMisAlim(); break;
+    case 'guardarAlim': guardarAlim(); break;
+    case 'borrarAlim': borrarAlim(t.dataset.id); break;
     case 'postresBase': postresBase(); break;
     case 'postreDia': addPostres(parseInt(t.dataset.d, 10)); break;
     case 'nuevaReceta': S.cola = []; dlgFormReceta(null, 0); break;
@@ -2206,6 +2299,7 @@ document.addEventListener('change', e => {
     const m = $('#r_msg'); if (m) { m.className = 'msg ok'; m.textContent = 'Copiada de «'+o.name+'». Cambia lo que quieras y guarda.'; }
     return;
   }
+  if (e.target && e.target.id === 'alimFoto' && e.target.files.length) { leerFotoAlim(e.target.files[0]); e.target.value = ''; return; }
   if (e.target && e.target.id === 'docxIn' && e.target.files.length) { importarDocx(e.target.files); e.target.value = ''; return; } if (e.target && e.target.id === 'woplan') S.woPlanId = e.target.value; });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && S.view === 'login' && e.target.id === 'pw') entrar(false); });
 

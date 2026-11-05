@@ -411,5 +411,60 @@ function ingredienteCompra(linea){
   return { clave: clave !== null ? 'k:' + clave : 'n:' + nn.replace(/[,;(].*$/, '').trim(), nombre: nombreBonito, gramos, uds, cat: categoriaCompra(nn), suelto: gramos === null && uds === null };
 }
 
-window.RPT_RECETAS = { FUENTES_ALIM, buscarIngrediente, normalizar, ingredienteCompra,  estimarMacros, categorizar, parseIngrediente, leerDocx, recetaDeLineas, parseLineas, lineasDocumento };
+/* ---------- Alimentos propios y lectura de etiquetas ---------- */
+function registrarAlimento(nombre, v){
+  const k = normalizar(nombre).replace(/\s+/g, ' ').trim(); if (!k) return false;
+  FOOD_DB[k] = [+v.kcal || 0, +v.prot || 0, +v.carb || 0, +v.fat || 0, +v.peso || null, 'Mi alimento'];
+  return true;
+}
+/* Candidatos de un número leído por OCR: a veces se pierde la coma o la «g» se lee como 9. */
+function candidatosNum(raw){
+  const base = raw.replace(',', '.'), out = [], vis = {};
+  const add = (v, c) => { v = Math.round(v*100)/100; if (isFinite(v) && v >= 0 && v <= 100 && !(v in vis)) { vis[v] = 1; out.push([v, c]); } };
+  if (/[.]/.test(base)) {
+    const d = base.split('.')[1];
+    if (d.length >= 2) { const n9 = /9$/.test(d), n6 = /6$/.test(d); add(parseFloat(base), n9 ? 0.6 : n6 ? 0.3 : 0); if (n9 || n6) add(parseFloat(base.slice(0, -1)), n9 ? 0 : 0.2); }
+    else add(parseFloat(base), 0);
+  } else {
+    add(parseFloat(base), 0);
+    if (base.length >= 2) {
+      add(parseFloat(base.slice(0, -1) + '.' + base.slice(-1)), 1);
+      if (/[96]$/.test(base) && base.length >= 3) { const t = base.slice(0, -1); add(parseFloat(t.slice(0, -1) + '.' + t.slice(-1)), 1.5); add(parseFloat(t), 1.5); }
+    }
+  }
+  return out;
+}
+function parseEtiqueta(texto){
+  const t = normalizar(texto).replace(/[|_]/g, ' ');
+  const num = '(\\d+(?:[.,]\\d+)?)', sep = '[\\s\\/:.\\-]*';
+  const pesca = re => { const m = t.match(re); return m ? m[1] : null; };
+  const kc = pesca(/(\d{2,4})\s*kcal/) || pesca(/kcal[\s:]*(\d{2,4})/);
+  const raw = {
+    fat: pesca(new RegExp('(?:grasas?|lipidos)' + sep + '(?:lipidos' + sep + ')?' + num)),
+    carb: pesca(new RegExp('(?:hidratos?(?:\\s+de\\s+carbono)?|carbohidratos?)' + sep + '(?:(?:hidratos?(?:\\s+de\\s+carbono)?|carboidratos?)' + sep + ')?' + num)),
+    prot: pesca(new RegExp('proteinas?' + sep + '(?:proteinas?' + sep + ')?' + num))
+  };
+  const kcal = kc ? parseInt(kc, 10) : null;
+  const C = {}; ['prot','carb','fat'].forEach(k => { C[k] = raw[k] ? candidatosNum(raw[k]) : [[null, 0]]; });
+  let mejor = null;
+  C.prot.forEach(p => C.carb.forEach(c => C.fat.forEach(f => {
+    const at = 4*(p[0]||0) + 4*(c[0]||0) + 9*(f[0]||0);
+    const err = kcal ? Math.abs(kcal - at) / kcal : 0, pun = p[1] + c[1] + f[1] + err*50;
+    if (!mejor || pun < mejor.pun) mejor = {p:p[0], c:c[0], f:f[0], pun, err};
+  })));
+  const v = {kcal, prot:mejor.p, carb:mejor.c, fat:mejor.f, estimado:null};
+  // Si una línea no se ha podido leer, se deduce de las kcal con las otras dos.
+  const falta = ['prot','carb','fat'].filter(k => v[k] == null);
+  if (kcal && falta.length === 1) {
+    const f = falta[0], resto = kcal - 4*(v.prot||0) - 4*(v.carb||0) - 9*(v.fat||0), div = f === 'fat' ? 9 : 4;
+    if (resto >= 0) { v[f] = resto/div; v.estimado = f; }
+  }
+  ['prot','carb','fat'].forEach(k => { if (v[k] != null) v[k] = Math.round(v[k]*10)/10; });
+  v.completo = kcal != null && v.prot != null && v.carb != null && v.fat != null;
+  v.cuadra = v.completo && mejor.err < 0.15;
+  v.por100 = /por\W{0,3}100/.test(t);
+  return v;
+}
+
+window.RPT_RECETAS = { registrarAlimento, parseEtiqueta, FUENTES_ALIM, buscarIngrediente, normalizar, ingredienteCompra,  estimarMacros, categorizar, parseIngrediente, leerDocx, recetaDeLineas, parseLineas, lineasDocumento };
 })();
