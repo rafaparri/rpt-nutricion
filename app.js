@@ -728,7 +728,7 @@ function vDiaMenu(p, i){
   }
   r += '</div>';
   h += '<div class="mlist">' + dia.meals.map((m, j) => tarjetaComida(i, j, m)).join('') + '</div>' +
-    '<button class="btn secondary" style="margin-top:12px" data-act="addExtra" data-d="'+i+'">＋ Añadir un plato adicional</button>' + r;
+    '<div class="btn-row" style="margin-top:12px"><button class="btn secondary" data-act="postreDia" data-d="'+i+'">🍎 Postres</button><button class="btn secondary" data-act="addExtra" data-d="'+i+'">＋ Plato adicional</button></div>' + r;
   return h;
 }
 function semanaEstado(p){
@@ -952,6 +952,23 @@ async function addExtra(d){
   let n = 1, nombre = 'Adicional'; while (usados.indexOf(nombre) >= 0) { n++; nombre = 'Adicional '+n; }
   dia.meals.push({slot:nombre, rid:null, extra:true, manual:true});
   S.slotQ = ''; S.slot = {d, m:dia.meals.length - 1};
+  render(); dlgSlot();
+  await guardarMenu();
+}
+async function addPostres(d){
+  const dia = S.menu[d]; if (!dia) return;
+  dia.meals = dia.meals || [];
+  let primero = null;
+  [['Almuerzo','Postre almuerzo'], ['Cena','Postre cena']].forEach(([base, sl]) => {
+    if (dia.meals.some(m => m.slot === sl)) return;
+    const k = dia.meals.findIndex(m => m.slot === base);
+    if (k < 0) return;
+    dia.meals.splice(k+1, 0, {slot:sl, rid:null, manual:true});
+    if (!primero) primero = sl;
+  });
+  if (!primero) { setMsg('Este día ya tiene postre en el almuerzo y en la cena.', true); render(); return; }
+  const j = dia.meals.findIndex(m => m.slot === primero);
+  S.slotQ = ''; S.slot = {d, m:j};
   render(); dlgSlot();
   await guardarMenu();
 }
@@ -1393,6 +1410,7 @@ function vRecetario(){
     (S.rtab !== 'compartidas' && ['importada','manual','antigua'].filter(g => recetasDeGrupo(g).length).length > 1 ? '<div class="btn-row" style="margin-bottom:10px">' + [['','Todas'],['importada','📄 Word'],['manual','✍ A mano'],['antigua','Anteriores']].filter(x => !x[0] || recetasDeGrupo(x[0]).length).map(x => '<button class="btn '+((S.rgrp||'') === x[0] ? '' : 'secondary')+' small" data-act="rgrp" data-v="'+x[0]+'">'+x[1]+'</button>').join('') + '</div>' : '') +
     (S.rmsg ? '<div class="msg '+(S.rmsgOk?'ok':'err')+'">'+esc(S.rmsg)+'</div>' : '') + filas +
     '<div class="btn-row"><button class="btn" data-act="nuevaReceta">＋ Nueva receta</button><button class="btn secondary" data-act="importarWord">📄 Importar de Word</button></div>' +
+    '<button class="btn ghost" style="margin-top:10px" data-act="postresBase">🍎 Añadir postres básicos (fruta, yogur…)</button>' +
     (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar recetas… ('+S.recipes.length+')</button>' : '') +
     '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
 }
@@ -1838,6 +1856,31 @@ async function importarDocx(files){
   ok.forEach(r => { r.origen = 'importada'; });
   S.cola = ok; siguienteDeCola(); render();
 }
+const POSTRES_BASE = [
+  ['Pieza de fruta fresca', ['150 g manzana'], 'Una pieza de fruta de temporada (manzana, pera, naranja…). Cambia el nombre de la fruta si prefieres otra.'],
+  ['Plátano', ['150 g plátano'], 'Un plátano mediano. Muy bueno en días de más energía.'],
+  ['Yogur natural con nueces', ['125 g yogur natural', '20 g nueces'], 'Yogur natural con las nueces troceadas por encima.'],
+  ['Yogur con fresas', ['125 g yogur natural', '150 g fresas'], 'Yogur natural con las fresas troceadas.'],
+  ['Yogur proteico', ['200 g yogur proteico'], 'Yogur alto en proteínas, solo o con canela.'],
+  ['Requesón con fresas', ['150 g requesón', '100 g fresas'], 'Requesón con fresas troceadas.'],
+  ['Naranja', ['150 g naranja'], 'Una naranja pelada y en gajos.'],
+  ['Chocolate negro 85 %', ['30 g chocolate negro 85%'], 'Unas onzas de chocolate negro de alto porcentaje.']
+];
+async function postresBase(){
+  const tengo = {}; S.recipes.forEach(r => { tengo[norm(r.name)] = true; });
+  let n = 0;
+  try {
+    for (const [name, ing, prep] of POSTRES_BASE) {
+      if (tengo[norm(name)]) continue;
+      const e = RPT_RECETAS.estimarMacros(ing, 1);
+      await db.collection('nu_recipes').add({ownerUid:wsUid(), teamEmails:wsTeam(), ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now(), updatedMs:Date.now(), origen:'manual', name, servings:1, useIn:'Postre', ingredients:ing, prep, kcal:e.kcal, prot:e.prot, carb:e.carb, fat:e.grasa, weight:e.peso, category:RPT_RECETAS.categorizar(e.kcal, e.prot, e.carb, e.grasa), shared:false, sinContar:e.noReconocidos});
+      n++;
+    }
+    await cargarRecetas();
+    setRmsg(n ? 'Añadidos '+n+' postres básicos. Puedes cambiarlos o borrarlos como cualquier receta.' : 'Ya tienes todos los postres básicos.', true);
+  } catch(e){ setRmsg('No se pudieron añadir ('+((e && (e.code||e.message)) || 'error')+').', false); }
+  render();
+}
 async function compartirReceta(id){
   const r = recetaPorId(id); if (!r) return;
   try { await db.collection('nu_recipes').doc(id).update({shared:!r.shared}); await cargarRecetas(); }
@@ -2120,6 +2163,8 @@ document.addEventListener('click', e => {
     case 'rgrp': S.rgrp = t.dataset.v; render(); break;
     case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
     case 'verReceta': dlgVerReceta(t.dataset.id); break;
+    case 'postresBase': postresBase(); break;
+    case 'postreDia': addPostres(parseInt(t.dataset.d, 10)); break;
     case 'nuevaReceta': S.cola = []; dlgFormReceta(null, 0); break;
     case 'importarWord': { const i = $('#docxIn'); if (i) i.click(); break; }
     case 'editarReceta': S.cola = []; dlgFormReceta(recetaPorId(t.dataset.id), 0); break;
