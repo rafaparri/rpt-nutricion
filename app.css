@@ -110,3 +110,43 @@ img.appicon.big{width:96px;height:96px;border-radius:24px}
 
 .avisos{display:flex;flex-wrap:wrap;gap:8px}
 .chip.aviso{background:var(--t-chg-bg);border:1.5px solid var(--t-chg);color:var(--t-chg-fg);min-height:44px;padding:0 14px;border-radius:999px;font:800 16px var(--font);cursor:pointer}
+
+/* ---------- Menú: días en pastillas y comidas en tarjetas (como los entrenos) ---------- */
+.dpills{display:flex;gap:6px;overflow-x:auto;padding:4px 0 12px;-webkit-overflow-scrolling:touch}
+.dpill{flex:1 0 44px;min-width:44px;background:none;border:0;color:var(--t-muted);font-family:var(--font);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:6px;padding:0}
+.dpill .dl{position:relative;width:100%;height:54px;border-radius:18px;background:var(--t-surface2);display:flex;align-items:center;justify-content:center;font:800 22px var(--font);color:var(--t-text)}
+.dpill .dn{font:700 16px var(--font);letter-spacing:.03em}
+.dpill.on .dl{background:var(--t-accent);color:var(--t-ink)}
+.dpill.on .dn{color:var(--t-accent2)}
+.dpill.off .dl{border:2px dashed var(--t-edge);background:none;color:var(--t-muted3)}
+.dot{position:absolute;top:5px;right:6px;width:11px;height:11px;border-radius:50%}
+.dot.ok{background:var(--t-good-fg)}.dot.part{background:var(--t-accent2)}.dot.warn{background:var(--t-chg)}
+.dtit{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:4px 0 12px}
+.dtit h2{font-family:var(--font-title);font-size:30px;margin:0}
+.mlist{display:flex;flex-direction:column;gap:12px}
+.mcard{display:flex;align-items:flex-start;gap:14px;width:100%;text-align:left;background:var(--t-surface);border:1px solid var(--t-line);border-radius:22px;padding:16px;color:var(--t-text);font-family:var(--font);cursor:pointer}
+.mcard.e-hecho{border-color:var(--t-good-edge)}.mcard.e-no{border-color:var(--t-bad-edge)}.mcard.e-cambio{border-color:var(--t-chg)}
+.mcard.vacia{border-style:dashed}
+.mnum{flex:none;width:44px;height:44px;border-radius:50%;background:var(--t-surface2);color:var(--t-accent2);display:flex;align-items:center;justify-content:center;font:800 20px var(--font)}
+.mbody{flex:1;min-width:0}
+.mt{font-size:21px}
+.mplato{font-weight:800;font-size:19px;margin:3px 0}
+.mcard .chev{align-self:center;color:var(--t-muted2);font-size:26px}
+/* Tarjeta a pantalla casi completa, con flechas y puntos para pasar de una comida a otra */
+.dlg.pager{height:92vh;height:92dvh;max-height:92dvh;display:flex;flex-direction:column;padding:0;overflow:hidden}
+.pgr{display:flex;flex-direction:column;height:100%;min-height:0}
+.pgr-h{display:flex;align-items:flex-start;gap:12px;padding:18px 18px 12px;border-bottom:1px solid var(--t-line)}
+.pgr-t{font:800 26px var(--font-title)}
+.pgr-x{flex:none;width:48px;height:48px;border-radius:50%;border:1px solid var(--t-edge);background:none;color:var(--t-text);font-size:28px;cursor:pointer}
+.pgr-b{flex:1;overflow-y:auto;padding:18px;-webkit-overflow-scrolling:touch}
+.pgr-plato{font:800 24px/1.2 var(--font);text-align:center;margin:4px 0 8px}
+.pgr-kcal{text-align:center;font:800 64px/1 var(--font-title);color:var(--t-accent2)}
+.pgr-kcal small{font-size:24px;color:var(--t-muted)}
+.pgr-mac{text-align:center;font:700 20px var(--font);margin:6px 0}
+.pgr-f{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--t-line)}
+.pgr-n{width:56px;height:56px;border-radius:50%;border:1px solid var(--t-edge);background:var(--t-surface2);color:var(--t-text);font-size:28px;cursor:pointer}
+.pgr-n:disabled{opacity:.35}
+.pgr-dots{display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap}
+.pgr-dots i{width:10px;height:10px;border-radius:50%;background:var(--t-edge)}
+.pgr-dots i.on{width:34px;border-radius:6px;background:var(--t-accent)}
+.pgr-x{margin-left:auto}
