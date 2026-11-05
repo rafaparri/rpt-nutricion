@@ -260,7 +260,7 @@ function planSemana(p){
   const lv = S.levels, kg = kgDe();
   if (!lv || !lv.some(x => x) || !kg || !datosOk(p)) return null;
   const comp = diasCompeticion(p.id), obj = tipoObjetivo(p);
-  const clave = [p.id, S.weekStart, lv.join(''), kg, obj, p.rateKg || '', p.heightCm, p.birthYear, p.sex, Object.keys(comp).sort().join(',')].join('|');
+  const clave = [p.id, S.weekStart, lv.join(''), kg, obj, p.rateKg || '', p.targetKg || '', p.targetDate || '', p.heightCm, p.birthYear, p.sex, Object.keys(comp).sort().join(',')].join('|');
   if (_planCache.k === clave) return _planCache.v;
   const reposo = reposoDe(p, kg), dias = [];
   for (let i = 0; i < 7; i++) {
@@ -271,10 +271,19 @@ function planSemana(p){
     dias.push({nivel, mant, cap});
   }
   const capacidad = dias.reduce((a, d) => a + d.cap, 0);
-  const ritmoPedido = obj === 'mantener' ? 0 : (parseFloat(p.rateKg) > 0 ? parseFloat(p.rateKg) : (obj === 'bajar' ? RITMO_BAJAR : RITMO_SUBIR));
+  const meta = parseFloat(p.targetKg), fObj = p.targetDate || '';
+  let ritmoPedido, semRest = null, fechaPasada = false;
+  if (obj !== 'mantener' && meta > 0 && fObj) {
+    // El ritmo sale de la fecha: kilos que faltan entre las semanas que quedan (desde el lunes de la semana que se ve).
+    const dias = Math.round((new Date(fObj+'T00:00') - new Date(S.weekStart+'T00:00'))/864e5);
+    const falta = obj === 'bajar' ? kg - meta : meta - kg;
+    if (falta <= 0) ritmoPedido = 0;
+    else if (dias < 7) { fechaPasada = true; ritmoPedido = 0; }
+    else { semRest = dias/7; ritmoPedido = falta/semRest; }
+  } else ritmoPedido = obj === 'mantener' ? 0 : (parseFloat(p.rateKg) > 0 ? parseFloat(p.rateKg) : (obj === 'bajar' ? RITMO_BAJAR : RITMO_SUBIR));
   const pedido = ritmoPedido*KCAL_KG, aplicado = Math.min(pedido, capacidad);
   const adj = dias.map(d => !capacidad ? 0 : (obj === 'bajar' ? -1 : 1) * d.cap*aplicado/capacidad);
-  const v = {adj, obj, capacidad, pedido, aplicado, ritmoPedido, ritmo: aplicado/KCAL_KG, limitado: pedido > capacidad + 1, diasConDeficit: dias.filter(d => d.cap > 0).length};
+  const v = {adj, obj, capacidad, pedido, aplicado, ritmoPedido, ritmo: aplicado/KCAL_KG, limitado: pedido > capacidad + 1, semRest, fechaPasada, porFecha: semRest !== null, diasConDeficit: dias.filter(d => d.cap > 0).length};
   _planCache = {k:clave, v};
   return v;
 }
@@ -305,11 +314,13 @@ function vObjetivo(p){
   const n1 = x => (Math.round(x*100)/100).toLocaleString('es-ES');
   let h = '<div class="card"><h3>Objetivo: '+nombre+'</h3>';
   if (obj === 'mantener') return h + '<p class="sub">Las kcal de cada día son iguales a lo que gasta. No hay déficit ni superávit.</p></div>';
-  h += '<p style="margin:0 0 6px">'+(meta ? 'De <b>'+kgTxt(kg)+' kg</b> a <b>'+kgTxt(meta)+' kg</b> · ' : '')+'ritmo pedido <b>'+n1(pl.ritmoPedido)+' kg/semana</b> ('+fmtN(pl.pedido)+' kcal a la semana).</p>';
+  if (pl.fechaPasada) return h + '<p class="sub" style="color:var(--t-chg-fg)">La fecha objetivo ('+fechaCorta(p.targetDate)+') ya está encima o ha pasado. Cambia la fecha en «Editar usuario».</p></div>';
+  if (pl.porFecha) h += '<p style="margin:0 0 6px">Meta: <b>'+kgTxt(meta)+' kg</b> el <b>'+fechaCorta(p.targetDate)+'</b>. Tienes <b>'+kgTxt(kg)+' kg</b> y quedan unas <b>'+Math.round(pl.semRest)+' semanas</b>: hace falta '+(obj === 'bajar' ? 'bajar' : 'subir')+' <b>'+n1(pl.ritmoPedido)+' kg/semana</b> ('+fmtN(pl.pedido)+' kcal a la semana).</p>';
+  else h += '<p style="margin:0 0 6px">'+(meta ? 'De <b>'+kgTxt(kg)+' kg</b> a <b>'+kgTxt(meta)+' kg</b> · ' : '')+'ritmo previsto <b>'+n1(pl.ritmoPedido)+' kg/semana</b> ('+fmtN(pl.pedido)+' kcal a la semana). Pon una fecha objetivo en «Editar usuario» y el ritmo se calcula solo.</p>';
   if (pl.capacidad < 1) return h + '<p class="sub" style="color:var(--t-chg-fg)">Esta semana no hay días que admitan déficit (solo Descanso y Baja, y sin competición). Con tanta carga no se puede bajar peso sin quitar energía al entreno.</p></div>';
   h += '<p style="margin:0 0 6px">Esta semana cabe: <b>'+n1(pl.ritmo)+' kg/semana</b> ('+fmtN(pl.aplicado)+' kcal) repartidos en '+pl.diasConDeficit+' día'+(pl.diasConDeficit === 1 ? '' : 's')+' de '+(obj === 'bajar' ? 'Descanso/Baja' : 'la semana')+'.</p>';
-  if (pl.limitado) h += '<p class="sub" style="color:var(--t-chg-fg)">⚠ El ritmo pedido no cabe sin tocar los días de entreno. Más días de Descanso o Baja, o un ritmo menor, lo harían posible. Los días de carga se mantienen siempre a mantenimiento.</p>';
-  if (meta && pl.ritmo > 0.01) { const falta = Math.abs(kg - meta), sem = Math.ceil(falta/pl.ritmo); if ((obj === 'bajar' && meta < kg) || (obj === 'subir' && meta > kg)) h += '<p class="sub">A este ritmo, unas <b>'+sem+' semanas</b> para llegar a '+kgTxt(meta)+' kg.</p>'; }
+  if (pl.limitado) h += '<p class="sub" style="color:var(--t-chg-fg)">⚠ Ese ritmo no cabe sin tocar los días de entreno. Más días de Descanso o Baja, o una fecha más lejana, lo harían posible. Los días de carga se mantienen siempre a mantenimiento.</p>';
+  if (meta && pl.ritmo > 0.01) { const falta = Math.abs(kg - meta), sem = Math.ceil(falta/pl.ritmo); if ((obj === 'bajar' && meta < kg) || (obj === 'subir' && meta > kg)) h += '<p class="sub">'+(pl.porFecha && pl.limitado ? 'Con lo que cabe cada semana, llegarías a '+kgTxt(meta)+' kg hacia el <b>'+fechaCorta(sumaDias(S.weekStart, sem*7))+'</b>.' : 'A este ritmo, unas <b>'+sem+' semanas</b> para llegar a '+kgTxt(meta)+' kg.')+'</p>'; }
   return h + '</div>';
 }
 function vMacros(p){
@@ -1209,7 +1220,7 @@ function explicacionSemana(p, ds, rs){
   trozos.push('El gasto estimado parte del metabolismo en reposo ('+fmtN(reposo)+' kcal, fórmula de Mifflin-St Jeor con '+kgTxt(kg)+' kg) multiplicado por un factor según el nivel del día: 1,2 · 1,375 · 1,55 · 1,725 (Descanso, Baja, Media, Alta).');
   trozos.push(obj === 'bajar' ? 'Como el objetivo es bajar peso, el déficit solo se aplica en los días de Descanso y Baja; en los días Medio, Alto y de competición se come lo que se gasta, de modo que el entreno no pierde energía.' : obj === 'subir' ? 'Como el objetivo es ganar peso, se añade un superávit del 10 % a todos los días.' : 'Como el objetivo es mantener, el objetivo diario coincide con el gasto estimado.');
   trozos.push('Los macros se calculan así: proteína 2 g/kg, grasa 1 g/kg (hasta 0,7 g/kg si hace falta) y el resto en carbohidratos, protegiendo un mínimo de 3 g/kg para el entreno.');
-  { const pl = planSemana(p); if (pl && pl.obj !== 'mantener') trozos.push('<b>Objetivo:</b> '+(pl.obj === "bajar" ? 'bajar' : 'subir')+' a '+(Math.round(pl.ritmoPedido*100)/100).toLocaleString('es-ES')+' kg por semana'+(p.targetKg ? ' hasta '+kgTxt(parseFloat(p.targetKg))+' kg' : '')+'. Esta semana cabe '+(Math.round(pl.ritmo*100)/100).toLocaleString('es-ES')+' kg ('+fmtN(pl.aplicado)+' kcal repartidas en '+pl.diasConDeficit+' días de Descanso/Baja)'+(pl.limitado ? ': el ritmo pedido no cabe sin quitar energía a los días de entreno.' : '.')); }
+  { const pl = planSemana(p); if (pl && pl.obj !== 'mantener') trozos.push('<b>Objetivo:</b> '+(pl.obj === "bajar" ? 'bajar' : 'subir')+(p.targetDate ? ' (fecha objetivo '+fechaCorta(p.targetDate)+') ' : '')+' a '+(Math.round(pl.ritmoPedido*100)/100).toLocaleString('es-ES')+' kg por semana'+(p.targetKg ? ' hasta '+kgTxt(parseFloat(p.targetKg))+' kg' : '')+'. Esta semana cabe '+(Math.round(pl.ritmo*100)/100).toLocaleString('es-ES')+' kg ('+fmtN(pl.aplicado)+' kcal repartidas en '+pl.diasConDeficit+' días de Descanso/Baja)'+(pl.limitado ? ': el ritmo pedido no cabe sin quitar energía a los días de entreno.' : '.')); }
   if (rs.nMenu) trozos.push('El menú planificado aporta de media <b>'+fmtN(rs.menuMedio)+' kcal/día frente a un objetivo de '+fmtN(rs.objMedio)+'</b> (<b>'+Math.round(rs.cobertura*100)+' %</b> cubierto). Frente al gasto estimado, el balance semanal es de <b>'+(rs.balance >= 0 ? '+' : '−')+fmtN(Math.abs(rs.balance))+' kcal</b> (≈ '+(rs.balance >= 0 ? '+' : '−')+Math.round(Math.abs(rs.balance)/7.7)+' g de grasa).');
   return trozos.map(t => '<p>'+t+'</p>').join('');
 }
@@ -1433,7 +1444,7 @@ function dlgPaciente(p){
     '<div class="grid2"><div class="field"><label class="f" for="d_h">Altura (cm)</label><input id="d_h" inputmode="numeric" value="'+esc(v.heightCm||'')+'"></div>' +
     '<div class="field"><label class="f" for="d_gt">Objetivo de peso</label><select id="d_gt">'+[['mantener','Mantener'],['bajar','Bajar'],['subir','Subir']].map(o=>'<option value="'+o[0]+'"'+(o[0]===tipoObjetivo(v)?' selected':'')+'>'+o[1]+'</option>').join('')+'</select></div></div>' +
     '<div class="grid2"><div class="field"><label class="f" for="d_tkg">Peso objetivo (kg)</label><input id="d_tkg" inputmode="decimal" value="'+esc(v.targetKg||'')+'" placeholder="Opcional"></div>' +
-    '<div class="field"><label class="f" for="d_rate">Ritmo (kg/semana)</label><input id="d_rate" inputmode="decimal" value="'+esc(v.rateKg||'')+'" placeholder="0,5 al bajar"></div></div>' +
+    '<div class="field"><label class="f" for="d_tdate">Fecha objetivo</label><input id="d_tdate" type="date" value="'+esc(v.targetDate||'')+'"></div></div><p class="sub" style="margin:-4px 0 10px">Pon el peso y la fecha: la app calcula sola el ritmo semanal y lo ajusta cada semana con tu último peso.</p>' +
     '<div class="field"><label class="f" for="d_dom">Lado dominante</label><select id="d_dom">'+['','Derecho','Izquierdo'].map(o=>'<option'+(o===(v.dominant||'')?' selected':'')+' value="'+o+'">'+(o||'—')+'</option>').join('')+'</select></div>' +
     '<div class="field"><label class="f" for="d_goal">Objetivo (texto libre)</label><input id="d_goal" value="'+esc(v.goal||'')+'" placeholder="Opcional"></div>' +
     '<div class="field"><label class="f" for="d_notes">Notas</label><input id="d_notes" value="'+esc(v.notes||'')+'"></div>' +
@@ -1595,10 +1606,10 @@ async function guardarPaciente(id){
   if (h !== null && (h < 80 || h > 250)){ $('#d_msg').textContent = 'La altura debe estar entre 80 y 250 cm.'; return; }
   if (y !== null && (y < 1900 || y > new Date().getFullYear())){ $('#d_msg').textContent = 'Año de nacimiento no válido.'; return; }
   const dec = x => { const n = parseFloat(g(x).replace(',', '.')); return isFinite(n) && n > 0 ? n : null; };
-  const tk = dec('d_tkg'), rt = dec('d_rate');
+  const tk = dec('d_tkg'), td = g('d_tdate') || null, rt = null;
   if (tk !== null && (tk < 30 || tk > 250)){ $('#d_msg').textContent = 'El peso objetivo debe estar entre 30 y 250 kg.'; return; }
-  if (rt !== null && rt > 1.5){ $('#d_msg').textContent = 'El ritmo máximo razonable es 1,5 kg a la semana.'; return; }
-  const datos = { name, sex:g('d_sex'), birthYear:y, heightCm:h, goal:g('d_goal'), goalType:g('d_gt'), notes:g('d_notes'), targetKg:tk, rateKg:rt, dominant:g('d_dom') };
+  if (td && !tk){ $('#d_msg').textContent = 'Para usar una fecha objetivo escribe también el peso objetivo.'; return; }
+  const datos = { name, sex:g('d_sex'), birthYear:y, heightCm:h, goal:g('d_goal'), goalType:g('d_gt'), notes:g('d_notes'), targetKg:tk, targetDate:td, rateKg:rt, dominant:g('d_dom') };
   try {
     if (id) await refPac(id).update(datos);
     else await db.collection('nu_patients').add(Object.assign({ownerUid:wsUid(), teamEmails:wsTeam(), linkedUid:null, createdAt:firebase.firestore.FieldValue.serverTimestamp()}, datos));
