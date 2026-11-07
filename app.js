@@ -1410,6 +1410,7 @@ function vRecetario(){
     (S.rtab !== 'compartidas' && ['importada','manual','antigua'].filter(g => recetasDeGrupo(g).length).length > 1 ? '<div class="btn-row" style="margin-bottom:10px">' + [['','Todas'],['importada','📄 Word'],['manual','✍ A mano'],['antigua','Anteriores']].filter(x => !x[0] || recetasDeGrupo(x[0]).length).map(x => '<button class="btn '+((S.rgrp||'') === x[0] ? '' : 'secondary')+' small" data-act="rgrp" data-v="'+x[0]+'">'+x[1]+'</button>').join('') + '</div>' : '') +
     (S.rmsg ? '<div class="msg '+(S.rmsgOk?'ok':'err')+'">'+esc(S.rmsg)+'</div>' : '') + filas +
     '<div class="btn-row"><button class="btn" data-act="nuevaReceta">＋ Nueva receta</button><button class="btn secondary" data-act="importarWord">📄 Importar de Word</button></div>' +
+    '<button class="btn secondary" style="margin-top:10px" data-act="revisarRec">🔎 Revisar recetas con la base de ingredientes</button>' +
     '<button class="btn secondary" style="margin-top:10px" data-act="fotoAlim">📷 Añadir un alimento con foto'+((S.foods||[]).length ? ' ('+S.foods.length+' propios)' : '')+'</button>' +
     ((S.foods||[]).length ? '<button class="btn ghost" style="margin-top:6px" data-act="misAlim">Ver mis alimentos</button>' : '') +
     '<button class="btn ghost" style="margin-top:10px" data-act="postresBase">🍎 Añadir postres básicos (fruta, yogur…)</button>' +
@@ -1970,6 +1971,51 @@ async function borrarAlim(id){
   catch(e){ setRmsg('No se pudo borrar ('+((e && (e.code||e.message)) || 'error')+').', false); }
   dlgMisAlim(); render();
 }
+/* ---------- Revisión de recetas contra la base de ingredientes ---------- */
+function revisaReceta(r){
+  const prob = [], ing = (r.ingredients || []).filter(x => String(x).trim());
+  const serv = Math.max(parseInt(r.servings, 10) || 1, 1);
+  let nuevo = null;
+  if (!ing.length) prob.push('No tiene lista de ingredientes: no se puede comprobar.');
+  else {
+    const e = RPT_RECETAS.estimarMacros(ing, serv);
+    if (e.noReconocidos.length) prob.push('Ingredientes que la base no reconoce y no cuentan: '+e.noReconocidos.join(', ')+'.');
+    else {
+      nuevo = e;
+      const d = Math.abs((r.kcal||0) - e.kcal);
+      if (d > Math.max(20, 0.05*e.kcal)) prob.push('Guardada con '+Math.round(r.kcal||0)+' kcal; con la base corregida salen '+Math.round(e.kcal)+' kcal por ración.');
+    }
+  }
+  if (recetaIncoherente(r)) prob.push('Las kcal no cuadran con los macros (P '+r1(r.prot||0)+' · C '+r1(r.carb||0)+' · G '+r1(r.fat||0)+' dan unas '+Math.round(kcalMacros(r))+' kcal).');
+  const kc = (nuevo ? nuevo.kcal : r.kcal) || 0;
+  if (kc > 0 && kc < 30) prob.push('Solo '+Math.round(kc)+' kcal por ración: ¿falta algún ingrediente o están mal las raciones ('+serv+')?');
+  if (kc > 1500) prob.push(Math.round(kc)+' kcal por ración es mucho: ¿están bien las raciones ('+serv+')?');
+  return {r, prob, nuevo, cambia: !!(nuevo && Math.abs((r.kcal||0) - nuevo.kcal) > Math.max(20, 0.05*nuevo.kcal))};
+}
+function dlgRevision(){
+  const res = S.recipes.map(revisaReceta), malas = res.filter(x => x.prob.length), cambian = res.filter(x => x.cambia && x.nuevo);
+  S.revCambian = cambian.map(x => x.r.id);
+  abrirDlg('<h2>Revisar recetas</h2><p class="sub" style="margin-bottom:10px">Compara cada receta con la base de ingredientes (ya corregida). Revisadas: <b>'+res.length+'</b> · con avisos: <b>'+malas.length+'</b>.</p>' +
+    (cambian.length ? '<button class="btn" style="margin-bottom:12px" data-act="recalcularTodas">🔄 Recalcular las '+cambian.length+' recetas que cambian</button>' : '<div class="msg ok">✓ Los macros guardados coinciden con la base.</div>') +
+    (malas.length ? '<div class="list">' + malas.slice(0, 60).map(x => '<button class="row" data-act="editarReceta" data-id="'+esc(x.r.id)+'"><div class="grow"><b>'+esc(x.r.name)+'</b>' + x.prob.map(p => '<p class="sub" style="color:var(--t-chg-fg)">⚠ '+esc(p)+'</p>').join('') + '</div><span class="chev">›</span></button>').join('') + '</div>' + (malas.length > 60 ? '<p class="sub">…y '+(malas.length-60)+' más.</p>' : '') : '') +
+    '<p class="sub" style="margin-top:10px">«Recalcular» sustituye los kcal y macros guardados por los calculados desde los ingredientes, y solo toca recetas con todos los ingredientes reconocidos. Las demás las corriges tú con el botón de cada una.</p>' +
+    '<button class="btn secondary" style="margin-top:10px" data-act="cerrar">Cerrar</button>');
+}
+async function recalcularTodas(){
+  const ids = S.revCambian || [], b = db.batch ? null : null; let n = 0;
+  try {
+    for (const id of ids) {
+      const r = recetaPorId(id); if (!r) continue;
+      const x = revisaReceta(r); if (!x.nuevo) continue;
+      const e = x.nuevo;
+      await db.collection('nu_recipes').doc(id).update({kcal:e.kcal, prot:e.prot, carb:e.carb, fat:e.grasa, weight:e.peso || r.weight || 0, category:RPT_RECETAS.categorizar(e.kcal, e.prot, e.carb, e.grasa), sinContar:[], updatedMs:Date.now()});
+      n++;
+    }
+    await cargarRecetas();
+    setRmsg('Recalculadas '+n+' recetas con la base de ingredientes corregida.', true);
+    cerrarDlg(); render(); dlgRevision();
+  } catch(e){ setRmsg('No se pudo recalcular ('+((e && (e.code||e.message)) || 'error')+').', false); render(); }
+}
 async function compartirReceta(id){
   const r = recetaPorId(id); if (!r) return;
   try { await db.collection('nu_recipes').doc(id).update({shared:!r.shared}); await cargarRecetas(); }
@@ -2252,6 +2298,8 @@ document.addEventListener('click', e => {
     case 'rgrp': S.rgrp = t.dataset.v; render(); break;
     case 'rtab': S.rtab = t.dataset.v; setRmsg(null); render(); break;
     case 'verReceta': dlgVerReceta(t.dataset.id); break;
+    case 'revisarRec': dlgRevision(); break;
+    case 'recalcularTodas': recalcularTodas(); break;
     case 'fotoAlim': dlgFotoAlim(); break;
     case 'misAlim': dlgMisAlim(); break;
     case 'guardarAlim': guardarAlim(); break;

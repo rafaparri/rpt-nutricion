@@ -75,6 +75,38 @@ Object.keys(FUENTES_ALIM).forEach(k => {
   D.FOOD_DB[k] = [f[0], f[1], f[2], f[3], f[4] !== null ? f[4] : (prev ? prev[4] : 100)];
 });
 
+/* Revisión de la base (nov 2026): valores y pesos corregidos con tablas estándar (BEDCA/USDA) y etiquetas habituales. */
+const REVISION = {
+  "jamon cocido": [110,19,1,3.8,20], "jamon york": [110,19,1,3.8,20], "jamon de york": [110,19,1,3.8,20], "fiambre de jamon": [110,19,1,3.8,20],
+  "jamon serrano": [245,31,0.5,13.5,30], "jamon": [245,31,0.5,13.5,30],
+  "atun": [100,23,0,1,60], "atun al natural": [100,23,0,1,60],
+  "atun en aceite": [199,25,0,11,60], "atun fresco": [144,23.5,0,5,150], "atun rojo": [144,23.5,0,5,150], "bonito": [144,23.5,0,5,150],
+  "ternera": [170,21,0,9.5,150], "cebolla": [33,1.1,7,0.1,150],
+  "leche semidesnatada": [46,3.3,4.8,1.6,200], "leche entera": [61,3.2,4.8,3.3,200],
+  "yogur desnatado": [40,4.2,5.5,0.2,125], "yogur natural desnatado": [40,4.2,5.5,0.2,125],
+  "queso mozzarella": [280,22,2,20,30], "queso de cabra": [300,20,1,24,30],
+  "queso fresco batido": [48,8,3.8,0.3,125], "queso batido": [48,8,3.8,0.3,125],
+  "mantequilla de cacahuete": [600,25,20,50,15],
+  "salchicha": [300,14,1,27,50], "lomo embuchado": [290,40,1,14,20], "vacuno": [170,21,0,9.5,150],
+  "dorada": [96,18.5,0,2.5,200], "lubina": [97,18,0,2.5,200], "pulpo": [57,10.6,0.4,1.2,200],
+  "berberecho": [70,12,2,1.2,50], "anchoa": [210,25,0,11,5], "boqueron": [130,17,0,6.5,25],
+  "sardina en aceite": [208,24.6,0,11.5,85], "sardina en lata": [208,24.6,0,11.5,85], "salmon ahumado": [180,21,0,11,30],
+  "tortilla de patata": [190,6.5,15,11.5,150], "tortilla francesa": [160,11.5,0.5,12,110],
+  "seta": [22,2.5,3,0.3,100], "alcachofa": [22,2.7,2.6,0.1,100], "esparrago": [20,2.2,2,0.2,100],
+  "rucula": [25,2.6,3.7,0.7,30], "canonigo": [21,2,3,0.4,30],
+  "harina de trigo": [364,10,76,1,10], "harina": [364,10,76,1,10], "pan de centeno": [250,8.5,48,1.7,30], "biscote": [395,11,75,4,10],
+  "arroz con leche": [130,3.5,22,3.2,150], "pasta integral": [350,13,66,2.5,100],
+  "chocolate con leche": [535,7.5,58,30,10], "chocolate": [546,5,61,31,10], "chocolate negro 85": [580,11,19,47,10], "chocolate negro 85%": [580,11,19,47,10],
+  "aguacate": [141,1.5,5.9,12,150], "mango": [60,0.8,15,0.4,200], "quinoa": [368,14,64,6,185]
+};
+Object.keys(REVISION).forEach(k => { D.FOOD_DB[k] = REVISION[k]; });
+D.ALIAS["butter"] = "mantequilla"; D.ALIAS["carne de vacuno"] = "ternera";   // antes llevaba a «queso»
+/* Latas de conserva: peso escurrido típico (no los 120 g genéricos de antes) */
+const LATA_G = { "atun": 60, "atun al natural": 60, "atun claro": 60, "atun en aceite": 60, "sardina": 85, "caballa": 85, "mejillon": 65,
+  "tomate triturado": 400, "tomate": 400, "tomate frito": 400, "garbanzo": 240, "lenteja": 240, "alubia": 240, "judia blanca": 240, "maiz": 140, "guisante": 150, "pina": 140 };
+const esLata = u => u === 'lata' || u === 'latas' || u === 'can' || u === 'cans';
+function gramosUnidadDe(clave, unidad){ return esLata(unidad) && Object.prototype.hasOwnProperty.call(LATA_G, clave) ? LATA_G[clave] : UNIDADES[unidad]; }
+
 const IGNORAR = D.IGNORAR, VERBOS = new Set(D.VERBOS), VACIAS = new Set(D.VACIAS);
 const RACIONES_DEF = D.RACIONES;
 
@@ -126,7 +158,8 @@ function buscarIngrediente(nombreNorm){
     if (coinc !== pk.length) continue;
     const esPrincipal = pk.some(k => k === primera || (primera !== undefined && (parte(k, primera) || parte(primera, k))));
     const exacta = pk.length === 1 && pk[0] === primera ? 0.5 : 0; // la palabra exacta gana a la que solo la contiene (pinon / champinon)
-    const punt = coinc + exacta;
+    const exactos = pk.filter(k => ing.indexOf(k) >= 0).length; // a igualdad de coincidencias gana la clave con más palabras idénticas (semidesnatada ≠ desnatada)
+    const punt = coinc + exacta + 0.1 * exactos;
     if (esPrincipal && !mejorPrincipal) { mejor = clave; mejorP = punt; mejorPrincipal = true; }
     else if (esPrincipal === mejorPrincipal && punt > mejorP) { mejor = clave; mejorP = punt; }
   }
@@ -209,7 +242,7 @@ function estimarMacros(lineas, raciones){
     const [k100, p100, c100, g100, pesoU] = FOOD_DB[clave];
     if (cantidad === null) cantidad = 1;
     let gramos;
-    if (unidad && Object.prototype.hasOwnProperty.call(UNIDADES, unidad)) gramos = cantidad * UNIDADES[unidad];
+    if (unidad && Object.prototype.hasOwnProperty.call(UNIDADES, unidad)) gramos = cantidad * gramosUnidadDe(clave, unidad);
     else { gramos = cantidad * pesoU; if (nn.indexOf('grande') >= 0) gramos *= 1.3; else if (nn.indexOf('pequen') >= 0) gramos *= 0.7; }
     if (/aprox/i.test(linea)) { const g = gramosIndicados(linea); if (g) gramos = g; }
     const f = gramos / 100;
@@ -401,7 +434,7 @@ function ingredienteCompra(linea){
   if (clave !== null) {
     const pesoU = FOOD_DB[clave][4];
     if (cantidad === null) cantidad = 1;
-    if (unidad && Object.prototype.hasOwnProperty.call(UNIDADES, unidad)) gramos = cantidad * UNIDADES[unidad];
+    if (unidad && Object.prototype.hasOwnProperty.call(UNIDADES, unidad)) gramos = cantidad * gramosUnidadDe(clave, unidad);
     else { gramos = cantidad * pesoU; uds = cantidad; if (nn.indexOf('grande') >= 0) gramos *= 1.3; else if (nn.indexOf('pequen') >= 0) gramos *= 0.7; }
     if (/aprox/i.test(linea)) { const g = gramosIndicados(linea); if (g) gramos = g; }
   } else {
