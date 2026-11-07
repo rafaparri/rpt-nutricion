@@ -406,6 +406,7 @@ function recetaDeLineas(parrafos){
 }
 
 async function leerDocx(arrayBuffer){
+  if (!window.JSZip) await new Promise(ok => { const sc = document.createElement('script'); sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'; sc.onload = sc.onerror = ok; document.head.appendChild(sc); });
   if (!window.JSZip) throw new Error('No se ha cargado el lector de Word. Comprueba la conexión.');
   const zip = await window.JSZip.loadAsync(arrayBuffer);
   const f = zip.file('word/document.xml');

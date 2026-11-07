@@ -1580,9 +1580,9 @@ function vCalCard(p){
 }
 /* ---------- datos ---------- */
 async function cargarPacientes(){
+  const qEquipo = db.collection('nu_patients').where('teamEmails','array-contains',miEmail()).get().catch(e => { console.error('equipo', e); return {docs:[]}; });
   const propios = await db.collection('nu_patients').where('ownerUid','==',S.user.uid).get();
-  let compart = {docs:[]};
-  try { compart = await db.collection('nu_patients').where('teamEmails','array-contains',miEmail()).get(); } catch(e){ console.error('equipo', e); }
+  const compart = await qEquipo;
   const mapa = {}; propios.docs.concat(compart.docs).forEach(d => { mapa[d.id] = Object.assign({id:d.id}, d.data()); });
   const ajeno = compart.docs.find(d => d.data().ownerUid && d.data().ownerUid !== S.user.uid);
   S.wsOwner = ajeno ? ajeno.data().ownerUid : S.user.uid;
@@ -1722,18 +1722,21 @@ async function borrarSeguro(){
 /* ---------- recetas ---------- */
 const porNombre = (a,b) => String(a.name||'').localeCompare(String(b.name||''),'es');
 async function cargarRecetas(){
+  const qEq = db.collection('nu_recipes').where('teamEmails','array-contains',miEmail()).get().catch(e => { console.error('equipo recetas', e); return {docs:[]}; });
+  const qSh = db.collection('nu_recipes').where('shared','==',true).get().catch(e => { console.error('compartidas', e); return null; });
   const m = await db.collection('nu_recipes').where('ownerUid','==',S.user.uid).get();
-  let mt = {docs:[]};
-  try { mt = await db.collection('nu_recipes').where('teamEmails','array-contains',miEmail()).get(); } catch(e){ console.error('equipo recetas', e); }
+  const mt = await qEq;
   const mapa = {}; m.docs.concat(mt.docs).forEach(d => { mapa[d.id] = Object.assign({id:d.id}, d.data()); });
   const todos = Object.keys(mapa).map(k => mapa[k]).sort(porNombre);
   S.foods = todos.filter(r => r.tipoAlim);
   S.recipes = todos.filter(r => !r.tipoAlim);
   S.foods.forEach(f => { try { RPT_RECETAS.registrarAlimento(f.name, {kcal:f.kcal, prot:f.prot, carb:f.carb, fat:f.fat, peso:f.weight}); } catch(e){} });
-  try {
-    const c = await db.collection('nu_recipes').where('shared','==',true).get();
-    S.sharedRecipes = c.docs.map(d => Object.assign({id:d.id}, d.data())).filter(r => r.ownerUid !== S.user.uid && r.ownerUid !== wsUid() && !S.recipes.some(x => x.id === r.id)).sort(porNombre);
-  } catch(e){ S.sharedRecipes = []; console.error('compartidas', e); }
+  const c = await qSh;
+  S._shRaw = c ? c.docs.map(d => Object.assign({id:d.id}, d.data())) : [];
+  filtraCompartidas();
+}
+function filtraCompartidas(){
+  S.sharedRecipes = (S._shRaw || []).filter(r => r.ownerUid !== S.user.uid && r.ownerUid !== wsUid() && !S.recipes.some(x => x.id === r.id)).sort(porNombre);
 }
 function setRmsg(t, ok){ S.rmsg = t; S.rmsgOk = !!ok; }
 const recetaPorId = id => S.recipes.concat(S.sharedRecipes).find(r => r.id === id);
@@ -2373,13 +2376,18 @@ auth.onAuthStateChanged(async u => {
   try {
     // Ficha básica (nombre/correo); si ya existe por WorkOut no se toca.
     const ur = db.collection('users').doc(u.uid);
+    const pGrant = ur.collection('roleGrants').doc('nutritionist').get();
+    const pSol = cargarSolicitudes().catch(() => { S.requests = []; });
     const ud = await ur.get();
     S.prefs = (ud.exists && ud.data().nuPrefs) || {}; S.team = (ud.exists && Array.isArray(ud.data().nuTeam)) ? ud.data().nuTeam : []; S.wsOwner = null; S.wsTeamList = null;
     if (!ud.exists) await ur.set({email:u.email, name:u.displayName || (u.email||'').split('@')[0], createdAt:Date.now()});
-    const g = await ur.collection('roleGrants').doc('nutritionist').get();
+    const g = await pGrant;
     S.isNutri = g.exists;
-    try { await cargarSolicitudes(); } catch(e){ S.requests = []; }
-    if (S.isNutri) { await cargarPacientes(); try { await cargarRecetas(); } catch(e){ S.recipes = []; console.error('recetas', e); } try { await cargarLinks(); } catch(e){ S.links = []; } S.view = 'app'; S.tab = 'pacientes'; }
+    await pSol;
+    if (S.isNutri) {
+      // Todo a la vez (antes iba una consulta detrás de otra).
+      await Promise.all([cargarPacientes(), cargarRecetas().catch(e => { S.recipes = []; S.foods = []; S.sharedRecipes = []; console.error('recetas', e); }), cargarLinks().catch(() => { S.links = []; })]);
+      filtraCompartidas(); S.view = 'app'; S.tab = 'pacientes'; }
     else S.view = 'activar';
   } catch(e){ S.view = 'activar'; setMsg('No se pudieron leer tus datos. Comprueba la conexión.', false); }
   render();
