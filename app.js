@@ -1413,7 +1413,7 @@ function vRecetario(){
     '<button class="btn secondary" style="margin-top:10px" data-act="revisarRec">🔎 Revisar recetas con la base de ingredientes</button>' +
     '<button class="btn secondary" style="margin-top:10px" data-act="fotoAlim">📷 Añadir un alimento con foto'+((S.foods||[]).length ? ' ('+S.foods.length+' propios)' : '')+'</button>' +
     ((S.foods||[]).length ? '<button class="btn ghost" style="margin-top:6px" data-act="misAlim">Ver mis alimentos</button>' : '') +
-    '<button class="btn ghost" style="margin-top:10px" data-act="platosFuera">🍔 Añadir comida rápida (Bacon King Pop)</button>' +
+    '<button class="btn ghost" style="margin-top:10px" data-act="platosFuera">🍔 Añadir/actualizar comida rápida (Bacon King Pop + patatas)</button>' +
     '<button class="btn ghost" style="margin-top:10px" data-act="postresBase">🍎 Añadir postres básicos (fruta, yogur…)</button>' +
     (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar recetas… ('+S.recipes.length+')</button>' : '') +
     '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
@@ -1878,21 +1878,26 @@ const POSTRES_BASE = [
 ];
 /* Platos de comida rápida: valores ESTIMADOS (el producto salió el 3-nov-2026 y Burger King no publica aún la ficha en abierto). Sustituir por la ficha oficial. */
 const PLATOS_FUERA = [
-  ['Bacon King Pop doble carne (Burger King, estimado)', 'Almuerzo, Cena', ['280 g Bacon King Pop doble carne [339/21/17/19.6]'],
-   'Burger King. Pan con bacon, dos carnes tipo Whopper, queso fundido, bacon crujiente y salsa Bacon Pop con toque de mantequilla (las palomitas van aparte). VALORES ESTIMADOS a partir de hamburguesas parecidas de la carta (The King Bacon 2 carnes ≈ 1005 kcal, Doble Cheese Bacon XXL ≈ 959 kcal). Cuando tengas la ficha oficial de la app de Burger King, edita esta receta y cambia los números.']
+  ['Bacon King Pop doble carne + patatas (Burger King, estimado)', 'Almuerzo, Cena', ['280 g Bacon King Pop doble carne [339/21/17/19.6]', '117 g patatas fritas Burger King mediana [207/2.4/28.6/9.2]'],
+   'Burger King. Hamburguesa: pan con bacon, dos carnes tipo Whopper, queso fundido, bacon crujiente y salsa Bacon Pop con toque de mantequilla (las palomitas van aparte). Patatas: ración mediana de 117 g (207 kcal por 100 g, según Yazio). VALORES ESTIMADOS de la hamburguesa a partir de hamburguesas parecidas de la carta (The King Bacon 2 carnes ≈ 1005 kcal, Doble Cheese Bacon XXL ≈ 959 kcal). Cuando tengas la ficha oficial de la app de Burger King, edita esta receta y cambia los números.']
 ];
 async function platosFuera(){
   const tengo = {}; S.recipes.forEach(r => { tengo[norm(r.name)] = true; });
   let n = 0;
   try {
     for (const [name, uso, ing, prep] of PLATOS_FUERA) {
-      if (tengo[norm(name)]) continue;
       const e = RPT_RECETAS.estimarMacros(ing, 1);
+      const antes = S.recipes.find(r => norm(r.name) === norm('Bacon King Pop doble carne (Burger King, estimado)'));
+      if (antes && norm(name) !== norm(antes.name)) {   // la versión anterior (solo hamburguesa) se actualiza, no se duplica
+        await db.collection('nu_recipes').doc(antes.id).update({name, useIn:antes.useIn || uso, ingredients:ing, prep, kcal:e.kcal, prot:e.prot, carb:e.carb, fat:e.grasa, weight:e.peso, category:RPT_RECETAS.categorizar(e.kcal, e.prot, e.carb, e.grasa), sinContar:e.noReconocidos, updatedMs:Date.now()});
+        n++; continue;
+      }
+      if (tengo[norm(name)]) continue;
       await db.collection('nu_recipes').add({ownerUid:wsUid(), teamEmails:wsTeam(), ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now(), updatedMs:Date.now(), origen:'manual', name, servings:1, useIn:uso, ingredients:ing, prep, kcal:e.kcal, prot:e.prot, carb:e.carb, fat:e.grasa, weight:e.peso, category:RPT_RECETAS.categorizar(e.kcal, e.prot, e.carb, e.grasa), shared:false, sinContar:e.noReconocidos});
       n++;
     }
     await cargarRecetas();
-    setRmsg(n ? 'Añadido «'+PLATOS_FUERA[0][0]+'». Son valores estimados: cámbialos cuando tengas la ficha oficial.' : 'Ya lo tienes añadido.', true);
+    setRmsg(n ? 'Listo: «'+PLATOS_FUERA[0][0]+'». La hamburguesa es una estimación: cámbiala cuando tengas la ficha oficial.' : 'Ya lo tienes añadido.', true);
   } catch(e){ setRmsg('No se pudo añadir ('+((e && (e.code||e.message)) || 'error')+').', false); }
   render();
 }
