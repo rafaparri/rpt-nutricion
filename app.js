@@ -1880,7 +1880,7 @@ const POSTRES_BASE = [
 ];
 /* Platos de comida rápida: valores ESTIMADOS (el producto salió el 3-nov-2026 y Burger King no publica aún la ficha en abierto). Sustituir por la ficha oficial. */
 const PLATOS_FUERA = [
-  ['Bacon King Pop doble carne + patatas (Burger King, estimado)', 'Almuerzo, Cena', ['280 g Bacon King Pop doble carne [339/21/17/19.6]', '117 g patatas fritas Burger King mediana [207/2.4/28.6/9.2]'],
+  ['Hamburguesa Bacon King Pop doble carne + patatas (Burger King, estimado)', 'Almuerzo, Cena', ['280 g Bacon King Pop doble carne [339/21/17/19.6]', '117 g patatas fritas Burger King mediana [207/2.4/28.6/9.2]'],
    'Burger King. Hamburguesa: pan con bacon, dos carnes tipo Whopper, queso fundido, bacon crujiente y salsa Bacon Pop con toque de mantequilla (las palomitas van aparte). Patatas: ración mediana de 117 g (207 kcal por 100 g, según Yazio). VALORES ESTIMADOS de la hamburguesa a partir de hamburguesas parecidas de la carta (The King Bacon 2 carnes ≈ 1005 kcal, Doble Cheese Bacon XXL ≈ 959 kcal). Cuando tengas la ficha oficial de la app de Burger King, edita esta receta y cambia los números.']
 ];
 async function platosFuera(){
@@ -1889,7 +1889,8 @@ async function platosFuera(){
   try {
     for (const [name, uso, ing, prep] of PLATOS_FUERA) {
       const e = RPT_RECETAS.estimarMacros(ing, 1);
-      const antes = S.recipes.find(r => norm(r.name) === norm('Bacon King Pop doble carne (Burger King, estimado)'));
+      const viejos = ['Bacon King Pop doble carne (Burger King, estimado)', 'Bacon King Pop doble carne + patatas (Burger King, estimado)'].map(norm);
+      const antes = S.recipes.find(r => viejos.indexOf(norm(r.name)) >= 0);
       if (antes && norm(name) !== norm(antes.name)) {   // la versión anterior (solo hamburguesa) se actualiza, no se duplica
         await db.collection('nu_recipes').doc(antes.id).update({name, useIn:antes.useIn || uso, ingredients:ing, prep, kcal:e.kcal, prot:e.prot, carb:e.carb, fat:e.grasa, weight:e.peso, category:RPT_RECETAS.categorizar(e.kcal, e.prot, e.carb, e.grasa), sinContar:e.noReconocidos, updatedMs:Date.now()});
         n++; continue;
@@ -2024,7 +2025,10 @@ function revisaReceta(r){
   return {r, prob, nuevo, cambia: !!(nuevo && Math.abs((r.kcal||0) - nuevo.kcal) > Math.max(20, 0.05*nuevo.kcal))};
 }
 function dlgRevision(){
-  const res = S.recipes.map(revisaReceta), malas = res.filter(x => x.prob.length), cambian = res.filter(x => x.cambia && x.nuevo);
+  const res = S.recipes.map(revisaReceta), cuenta = {};
+  S.recipes.forEach(r => { const k = norm(r.name); cuenta[k] = (cuenta[k] || 0) + 1; });
+  res.forEach(x => { if (cuenta[norm(x.r.name)] > 1) x.prob.push('Está repetida ('+cuenta[norm(x.r.name)]+' recetas con este nombre). Borra las que sobren.'); });
+  const malas = res.filter(x => x.prob.length), cambian = res.filter(x => x.cambia && x.nuevo);
   S.revCambian = cambian.map(x => x.r.id);
   abrirDlg('<h2>Revisar recetas</h2><p class="sub" style="margin-bottom:10px">Compara cada receta con la base de ingredientes (ya corregida). Revisadas: <b>'+res.length+'</b> · con avisos: <b>'+malas.length+'</b>.</p>' +
     (cambian.length ? '<button class="btn" style="margin-bottom:12px" data-act="recalcularTodas">🔄 Recalcular las '+cambian.length+' recetas que cambian</button>' : '<div class="msg ok">✓ Los macros guardados coinciden con la base.</div>') +
