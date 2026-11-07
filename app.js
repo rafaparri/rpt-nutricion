@@ -1415,7 +1415,7 @@ function vRecetario(){
     '<button class="btn secondary" style="margin-top:10px" data-act="revisarRec">🔎 Revisar recetas con la base de ingredientes</button>' +
     '<button class="btn secondary" style="margin-top:10px" data-act="fotoAlim">📷 Añadir un alimento con foto'+((S.foods||[]).length ? ' ('+S.foods.length+' propios)' : '')+'</button>' +
     ((S.foods||[]).length ? '<button class="btn ghost" style="margin-top:6px" data-act="misAlim">Ver mis alimentos</button>' : '') +
-    '<button class="btn ghost" style="margin-top:10px" data-act="platosFuera">🍔 Añadir/actualizar comida rápida (Bacon King Pop + patatas)</button>' +
+    '<button class="btn ghost" style="margin-top:10px" data-act="platosFuera">🍔 Añadir platos preparados (Burger King, salmorejo…)</button>' +
     '<button class="btn ghost" style="margin-top:10px" data-act="postresBase">🍎 Añadir postres básicos (fruta, yogur…)</button>' +
     (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar recetas… ('+S.recipes.length+')</button>' : '') +
     '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
@@ -1881,15 +1881,17 @@ const POSTRES_BASE = [
 /* Platos de comida rápida: valores ESTIMADOS (el producto salió el 3-nov-2026 y Burger King no publica aún la ficha en abierto). Sustituir por la ficha oficial. */
 const PLATOS_FUERA = [
   ['Hamburguesa Bacon King Pop doble carne + patatas (Burger King, estimado)', 'Almuerzo, Cena', ['280 g Bacon King Pop doble carne [339/21/17/19.6]', '117 g patatas fritas Burger King mediana [207/2.4/28.6/9.2]'],
-   'Burger King. Hamburguesa: pan con bacon, dos carnes tipo Whopper, queso fundido, bacon crujiente y salsa Bacon Pop con toque de mantequilla (las palomitas van aparte). Patatas: ración mediana de 117 g (207 kcal por 100 g, según Yazio). VALORES ESTIMADOS de la hamburguesa a partir de hamburguesas parecidas de la carta (The King Bacon 2 carnes ≈ 1005 kcal, Doble Cheese Bacon XXL ≈ 959 kcal). Cuando tengas la ficha oficial de la app de Burger King, edita esta receta y cambia los números.']
+   'Burger King. Hamburguesa: pan con bacon, dos carnes tipo Whopper, queso fundido, bacon crujiente y salsa Bacon Pop con toque de mantequilla (las palomitas van aparte). Patatas: ración mediana de 117 g (207 kcal por 100 g, según Yazio). VALORES ESTIMADOS de la hamburguesa a partir de hamburguesas parecidas de la carta (The King Bacon 2 carnes ≈ 1005 kcal, Doble Cheese Bacon XXL ≈ 959 kcal). Cuando tengas la ficha oficial de la app de Burger King, edita esta receta y cambia los números.', ['Bacon King Pop doble carne (Burger King, estimado)', 'Bacon King Pop doble carne + patatas (Burger King, estimado)']],
+  ['Salmorejo Hacendado con AOVE 8 % (envase 330 ml)', 'Almuerzo, Cena', ['330 g Salmorejo Hacendado AOVE [134/1.5/9.5/10]'],
+   'Mercadona, Hacendado. Etiqueta por 100 ml: 134 kcal, grasas 10 g (saturadas 1,4), hidratos 9,5 g (azúcares 2,1), fibra 0,9 g, proteínas 1,5 g, sal 0,95 g. Envase de 330 ml = 1 ración: 442 kcal, 33 g de grasa, 31,4 g de hidratos, 5 g de proteína, 3,1 g de sal. Ingredientes: tomate, aceite de oliva virgen extra (8 %), pan (con gluten), aceite de girasol refinado, vinagre de vino, sal y ajo. Conservar entre 2 y 8 °C y consumir en 24 h una vez abierto.', []]
 ];
 async function platosFuera(){
   const tengo = {}; S.recipes.forEach(r => { tengo[norm(r.name)] = true; });
   let n = 0;
   try {
-    for (const [name, uso, ing, prep] of PLATOS_FUERA) {
+    for (const [name, uso, ing, prep, viejosL] of PLATOS_FUERA) {
       const e = RPT_RECETAS.estimarMacros(ing, 1);
-      const viejos = ['Bacon King Pop doble carne (Burger King, estimado)', 'Bacon King Pop doble carne + patatas (Burger King, estimado)'].map(norm);
+      const viejos = (viejosL || []).map(norm);
       const antes = S.recipes.find(r => viejos.indexOf(norm(r.name)) >= 0);
       if (antes && norm(name) !== norm(antes.name)) {   // la versión anterior (solo hamburguesa) se actualiza, no se duplica
         await db.collection('nu_recipes').doc(antes.id).update({name, useIn:antes.useIn || uso, ingredients:ing, prep, kcal:e.kcal, prot:e.prot, carb:e.carb, fat:e.grasa, weight:e.peso, category:RPT_RECETAS.categorizar(e.kcal, e.prot, e.carb, e.grasa), sinContar:e.noReconocidos, updatedMs:Date.now()});
@@ -1900,7 +1902,7 @@ async function platosFuera(){
       n++;
     }
     await cargarRecetas();
-    setRmsg(n ? 'Listo: «'+PLATOS_FUERA[0][0]+'». La hamburguesa es una estimación: cámbiala cuando tengas la ficha oficial.' : 'Ya lo tienes añadido.', true);
+    setRmsg(n ? 'Listo: añadidos o actualizados '+n+' plato'+(n > 1 ? 's' : '')+' preparado'+(n > 1 ? 's' : '')+'. La hamburguesa de Burger King es una estimación; el salmorejo lleva los datos de la etiqueta.' : 'Ya tienes todos estos platos.', true);
   } catch(e){ setRmsg('No se pudo añadir ('+((e && (e.code||e.message)) || 'error')+').', false); }
   render();
 }

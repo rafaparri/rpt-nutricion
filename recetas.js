@@ -96,7 +96,7 @@ const REVISION = {
   "rucula": [25,2.6,3.7,0.7,30], "canonigo": [21,2,3,0.4,30],
   "harina de trigo": [364,10,76,1,10], "harina": [364,10,76,1,10], "pan de centeno": [250,8.5,48,1.7,30], "biscote": [395,11,75,4,10],
   "arroz con leche": [130,3.5,22,3.2,150], "pasta integral": [350,13,66,2.5,100],
-  "chocolate con leche": [535,7.5,58,30,10], "chocolate": [546,5,61,31,10], "chocolate negro 85": [580,11,19,47,10], "chocolate negro 85%": [580,11,19,47,10],
+  "chocolate con leche": [535,7.5,58,30,10], "chocolate": [546,5,61,31,10], "salmorejo": [134,1.5,9.5,10,330], "chocolate negro 85": [580,11,19,47,10], "chocolate negro 85%": [580,11,19,47,10],
   "aguacate": [141,1.5,5.9,12,150], "mango": [60,0.8,15,0.4,200], "quinoa": [368,14,64,6,185]
 };
 Object.keys(REVISION).forEach(k => { D.FOOD_DB[k] = REVISION[k]; });
