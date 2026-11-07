@@ -1413,6 +1413,7 @@ function vRecetario(){
     '<button class="btn secondary" style="margin-top:10px" data-act="revisarRec">🔎 Revisar recetas con la base de ingredientes</button>' +
     '<button class="btn secondary" style="margin-top:10px" data-act="fotoAlim">📷 Añadir un alimento con foto'+((S.foods||[]).length ? ' ('+S.foods.length+' propios)' : '')+'</button>' +
     ((S.foods||[]).length ? '<button class="btn ghost" style="margin-top:6px" data-act="misAlim">Ver mis alimentos</button>' : '') +
+    '<button class="btn ghost" style="margin-top:10px" data-act="platosFuera">🍔 Añadir comida rápida (Bacon King Pop)</button>' +
     '<button class="btn ghost" style="margin-top:10px" data-act="postresBase">🍎 Añadir postres básicos (fruta, yogur…)</button>' +
     (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar recetas… ('+S.recipes.length+')</button>' : '') +
     '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
@@ -1875,6 +1876,26 @@ const POSTRES_BASE = [
   ['Naranja', ['150 g naranja'], 'Una naranja pelada y en gajos.'],
   ['Chocolate negro 85 %', ['30 g chocolate negro 85%'], 'Unas onzas de chocolate negro de alto porcentaje.']
 ];
+/* Platos de comida rápida: valores ESTIMADOS (el producto salió el 3-nov-2026 y Burger King no publica aún la ficha en abierto). Sustituir por la ficha oficial. */
+const PLATOS_FUERA = [
+  ['Bacon King Pop doble carne (Burger King, estimado)', 'Almuerzo, Cena', ['280 g Bacon King Pop doble carne [339/21/17/19.6]'],
+   'Burger King. Pan con bacon, dos carnes tipo Whopper, queso fundido, bacon crujiente y salsa Bacon Pop con toque de mantequilla (las palomitas van aparte). VALORES ESTIMADOS a partir de hamburguesas parecidas de la carta (The King Bacon 2 carnes ≈ 1005 kcal, Doble Cheese Bacon XXL ≈ 959 kcal). Cuando tengas la ficha oficial de la app de Burger King, edita esta receta y cambia los números.']
+];
+async function platosFuera(){
+  const tengo = {}; S.recipes.forEach(r => { tengo[norm(r.name)] = true; });
+  let n = 0;
+  try {
+    for (const [name, uso, ing, prep] of PLATOS_FUERA) {
+      if (tengo[norm(name)]) continue;
+      const e = RPT_RECETAS.estimarMacros(ing, 1);
+      await db.collection('nu_recipes').add({ownerUid:wsUid(), teamEmails:wsTeam(), ownerName:S.user.displayName || (S.user.email||'').split('@')[0], createdMs:Date.now(), updatedMs:Date.now(), origen:'manual', name, servings:1, useIn:uso, ingredients:ing, prep, kcal:e.kcal, prot:e.prot, carb:e.carb, fat:e.grasa, weight:e.peso, category:RPT_RECETAS.categorizar(e.kcal, e.prot, e.carb, e.grasa), shared:false, sinContar:e.noReconocidos});
+      n++;
+    }
+    await cargarRecetas();
+    setRmsg(n ? 'Añadido «'+PLATOS_FUERA[0][0]+'». Son valores estimados: cámbialos cuando tengas la ficha oficial.' : 'Ya lo tienes añadido.', true);
+  } catch(e){ setRmsg('No se pudo añadir ('+((e && (e.code||e.message)) || 'error')+').', false); }
+  render();
+}
 async function postresBase(){
   const tengo = {}; S.recipes.forEach(r => { tengo[norm(r.name)] = true; });
   let n = 0;
@@ -2307,6 +2328,7 @@ document.addEventListener('click', e => {
     case 'misAlim': dlgMisAlim(); break;
     case 'guardarAlim': guardarAlim(); break;
     case 'borrarAlim': borrarAlim(t.dataset.id); break;
+    case 'platosFuera': platosFuera(); break;
     case 'postresBase': postresBase(); break;
     case 'postreDia': addPostres(parseInt(t.dataset.d, 10)); break;
     case 'nuevaReceta': S.cola = []; dlgFormReceta(null, 0); break;
