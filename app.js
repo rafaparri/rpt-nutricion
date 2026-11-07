@@ -925,7 +925,7 @@ function dlgSlot(){
   const base = q ? S.recipes.filter(r => (r.kcal||0) > 0 && norm([r.name, r.useIn, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0) : candidatas(m.slot);
   const vAct = m.rid ? valsComida(m) : null, simDe = r => vAct ? similitud(r, vAct) : null;
   const cands = (vAct && !q ? base.filter(r => r.id !== m.rid).map(r => ({r, sim:simDe(r)})).sort((a, b) => b.sim - a.sim).map(x => x.r)
-    : (t ? base.map(r => ({r, sc:puntua(r, t, usos, null, delDia)})).sort((a,b) => a.sc - b.sc).map(x => x.r) : base)).slice(0, q ? 30 : 10);
+    : (t ? base.map(r => ({r, sc:puntua(r, t, usos, null, delDia)})).sort((a,b) => a.sc - b.sc).map(x => x.r) : base)).slice(0, q ? 30 : (S.slotAll ? 999 : 10));
   let cabecera = '<h2>'+DIAS[sl.d]+' · '+esc(m.slot)+'</h2>';
   if (t) cabecera += '<p class="sub" style="margin-bottom:12px">Objetivo de esta comida: '+Math.round(t.kcal)+' kcal · P '+Math.round(t.prot)+' · C '+Math.round(t.carb)+' · G '+Math.round(t.fat)+'</p>';
   let actual = '';
@@ -942,8 +942,10 @@ function dlgSlot(){
     const s = t ? escalaPara(r, t) : 1;
     return '<button class="row" data-act="elegirReceta" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b>'+(vAct ? ' <span style="font-weight:800;color:var(--t-accent)">'+simDe(r)+' % similar</span>' : '')+'<p class="sub">ración ×'+kgTxt(s)+' · '+Math.round(r.kcal*s)+' kcal · P '+r1(r.prot*s)+' · C '+r1(r.carb*s)+' · G '+r1(r.fat*s)+'</p></div><span class="chev">›</span></button>';
   }).join('') + '</div>' : '<div class="empty">'+(q ? 'Ninguna receta coincide.' : /^Postre/.test(m.slot) ? 'No hay recetas de postre. Crea una en el Recetario y marca «Postre» en «Utilizar en».' : 'No hay recetas para esta comida. Añade recetas en el Recetario.')+'</div>');
+  const hayMas = !q && !S.slotAll && base.filter(r => r.id !== m.rid).length > 10;
+  const verTodas = hayMas ? '<button class="btn secondary" style="margin-top:10px" data-act="slotTodas">Ver todas las recetas ('+base.filter(r => r.id !== m.rid).length+')</button>' : '';
   const botonReal = m.rid ? '<button class="btn secondary" style="margin-bottom:12px" data-act="realDlg">🔁 Cambio sobre la marcha'+(m.real ? ' (registrado)' : '')+'</button>' : '';
-  abrirDlg(cabecera + actual + botonReal + lista + '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
+  abrirDlg(cabecera + actual + botonReal + lista + verTodas + '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
 }
 async function addExtra(d){
   const dia = S.menu[d]; if (!dia) return;
@@ -1481,7 +1483,7 @@ function setMsg(t, ok){ S.msg = t; S.msgOk = !!ok; }
 
 /* ---------- ventana emergente ---------- */
 function abrirDlg(html){ $('#dlgBody').classList.remove('pager'); $('#dlgBody').innerHTML = html; $('#dlg').classList.add('open'); }
-function cerrarDlg(){ $('#dlg').classList.remove('open'); $('#dlgBody').classList.remove('pager'); S.slotPend = null; }
+function cerrarDlg(){ S.slotAll = false; $('#dlg').classList.remove('open'); $('#dlgBody').classList.remove('pager'); S.slotPend = null; }
 function selFechaObj(v){
   const cs = v.id ? compsProximas(v).sort((a, b) => a.date < b.date ? -1 : 1) : [], td = v.targetDate || '';
   const hay = cs.some(c => c.date === td);
@@ -2333,6 +2335,7 @@ document.addEventListener('click', e => {
     case 'misAlim': dlgMisAlim(); break;
     case 'guardarAlim': guardarAlim(); break;
     case 'borrarAlim': borrarAlim(t.dataset.id); break;
+    case 'slotTodas': S.slotAll = true; dlgSlot(); break;
     case 'platosFuera': platosFuera(); break;
     case 'postresBase': postresBase(); break;
     case 'postreDia': addPostres(parseInt(t.dataset.d, 10)); break;
