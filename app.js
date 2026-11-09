@@ -593,24 +593,14 @@ const hayReal = dia => (dia.meals||[]).some(m => m.rid && (m.real || m.estado ==
 function dlgReal(){
   const p = pacienteActual(), sl = S.slot; if (!p || !sl) return;
   const m = S.menu[sl.d].meals[sl.m], plan = valsComida(m);
-  let h = '<h2>'+DIAS[sl.d]+' · '+esc(m.slot)+'</h2><p class="sub" style="margin-bottom:10px">Cambio sobre la marcha: lo que se comió de verdad frente a lo planificado.</p>' +
-    '<div class="card" style="margin-bottom:10px"><p class="sub">Planificado</p><b>'+esc(m.name)+'</b><p class="sub">'+Math.round(plan.kcal)+' kcal · P '+r1(plan.prot)+' · C '+r1(plan.carb)+' · G '+r1(plan.fat)+'</p></div>';
-  if (m.real) {
-    const rv = valsReal(m);
-    h += '<div class="card accent" style="margin-bottom:10px"><p class="sub">Comido</p><b>'+(m.real.none ? 'No se comió' : esc(m.real.name))+'</b>' +
-      '<p class="sub">'+Math.round(rv.kcal)+' kcal · P '+r1(rv.prot)+' · C '+r1(rv.carb)+' · G '+r1(rv.fat)+'</p>' +
-      '<p style="margin:6px 0 10px;font-weight:800;font-size:17px">Variación: '+txtVariacion(plan, rv)+'</p>' +
-      (m.real.none ? '' : '<div class="btn-row"><button class="btn secondary" data-act="escalaReal" data-n="-0.1">− Ración</button><b style="align-self:center;text-align:center;min-width:64px">×'+kgTxt(Math.round(m.real.s*100)/100)+'</b><button class="btn secondary" data-act="escalaReal" data-n="0.1">＋ Ración</button></div>') +
-      '<button class="btn danger" style="margin-top:10px" data-act="quitarReal">Volver a lo planificado</button></div>';
-  }
   const q = norm(S.realQ || '');
   const lista = S.recipes.filter(r => (r.kcal||0) > 0 && (!q || norm([r.name, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0)).slice(0, q ? 30 : 12);
-  h += '<button class="btn secondary" style="margin-bottom:10px" data-act="noComi">🚫 No se comió esta comida</button>' +
-    '<div class="card" style="margin-bottom:10px"><div class="field"><label class="f" for="rl_txt">O escribe lo que has comido (un ingrediente por línea)</label><textarea id="rl_txt" rows="3" placeholder="150 g de pollo&#10;100 g de arroz" style="padding:12px 14px;line-height:1.4"></textarea></div><div class="msg err" id="rl_msg"></div><button class="btn secondary" data-act="realLibre">🧮 Calcular y guardar</button></div>' +
-    '<div class="field"><label class="f" for="rq2">Lo que se comió</label><input id="rq2" type="search" value="'+esc(S.realQ||'')+'" placeholder="Buscar receta…" autocomplete="off"></div>' +
+  let h = '<h2>¿Qué has comido?</h2><p class="sub" style="margin-bottom:10px">'+DIAS[sl.d]+' · '+esc(m.slot)+' · previsto: '+esc(m.name)+' ('+Math.round(plan.kcal)+' kcal). Toca un plato y ya está.</p>' +
+    '<div class="field"><input id="rq2" type="search" value="'+esc(S.realQ||'')+'" placeholder="Buscar plato…" autocomplete="off" aria-label="Buscar plato"></div>' +
     (lista.length ? '<div class="list">'+lista.map(r => { const sc = Math.round(clamp(plan.kcal/Math.max(r.kcal,1), 0.3, 3)*20)/20;
-      return '<button class="row" data-act="elegirReal" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(sc)+' · '+Math.round(r.kcal*sc)+' kcal · P '+r1(r.prot*sc)+' · C '+r1(r.carb*sc)+' · G '+r1(r.fat*sc)+'</p></div><span class="chev">›</span></button>'; }).join('')+'</div>' : '<div class="empty">Ninguna receta coincide.</div>') +
-    '<div class="btn-row" style="margin-top:12px"><button class="btn secondary" data-act="comidaDlg" data-d="'+sl.d+'" data-m="'+sl.m+'">‹ Volver</button><button class="btn" data-act="comidaDlg" data-d="'+sl.d+'" data-m="'+sl.m+'">Hecho</button></div>';
+      return '<button class="row" data-act="elegirReal" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(sc)+' · '+Math.round(r.kcal*sc)+' kcal · P '+r1(r.prot*sc)+' · C '+r1(r.carb*sc)+' · G '+r1(r.fat*sc)+'</p></div><span class="chev">›</span></button>'; }).join('')+'</div>' : '<p class="sub">Sin resultados.</p>') +
+    '<details class="card" style="margin-top:12px"><summary style="font-weight:800;font-size:17px">✍ Escribir lo que he comido</summary><div class="field" style="margin-top:10px"><textarea id="rl_txt" rows="3" placeholder="150 g de pollo&#10;100 g de arroz" style="padding:12px 14px;line-height:1.4" aria-label="Ingredientes"></textarea></div><div class="msg err" id="rl_msg"></div><button class="btn secondary" data-act="realLibre">🧮 Calcular y guardar</button></details>' +
+    '<div class="btn-row" style="margin-top:12px"><button class="btn secondary" data-act="comidaDlg" data-d="'+sl.d+'" data-m="'+sl.m+'">‹ Volver</button></div>';
   abrirDlg(h);
 }
 function realLibre(){
@@ -618,7 +608,7 @@ function realLibre(){
   if (!t.length) { $('#rl_msg').textContent = 'Escribe lo que has comido.'; return; }
   const e = RPT_RECETAS.estimarMacros(t, 1);
   if (e.noReconocidos.length || !(e.kcal > 0)) { $('#rl_msg').textContent = e.noReconocidos.length ? 'No reconozco: '+e.noReconocidos.join(', ')+'. Escribe cantidades en gramos o añade sus valores entre corchetes.' : 'No he podido calcular las calorías.'; return; }
-  cambiarSlot(m => { delete m.estado; m.real = {slot:m.slot, rid:'libre', name:'Otro: '+t.join(', ').slice(0, 70), s:1, bk:e.kcal, bp:e.prot, bc:e.carb, bf:e.grasa, bw:e.peso}; }, false, null, dlgReal);
+  cambiarSlot(m => { delete m.estado; m.real = {slot:m.slot, rid:'libre', name:'Otro: '+t.join(', ').slice(0, 70), s:1, bk:e.kcal, bp:e.prot, bc:e.carb, bf:e.grasa, bw:e.peso}; }, false, null, dlgComida);
 }
 function totalDia(dia){
   const t = {kcal:0, prot:0, carb:0, fat:0};
@@ -693,13 +683,20 @@ function tarjetaDia(p, i){
 function tarjetaComida(i, j, m){
   const e = estMeal(m), num = '<span class="mnum">'+(j+1)+'</span>';
   if (e === 'vacia') return '<button class="mcard vacia" data-act="slotMenu" data-d="'+i+'" data-m="'+j+'">'+num+'<div class="mbody"><b class="mt">'+esc(m.slot)+'</b><p class="sub">Sin plato · toca para elegir</p></div><span class="chev">＋</span></button>';
-  const v = valsComida(m);
-  let real = '';
-  if (e === 'cambio') { const rv = valsComida(m.real); real = '<p class="sub" style="color:var(--t-chg-fg);font-weight:700">Comido: '+esc(m.real.name)+' · '+Math.round(rv.kcal)+' kcal · P '+r1(rv.prot)+' · C '+r1(rv.carb)+' · G '+r1(rv.fat)+'</p><p class="sub">Variación: '+txtVariacion(v, rv)+'</p>'; }
-  if (e === 'no') real = '<p class="sub">Variación: '+txtVariacion(v, CERO0)+'</p>';
-  return '<button class="mcard e-'+e+'" data-act="comidaDlg" data-d="'+i+'" data-m="'+j+'">'+num+'<div class="mbody"><b class="mt">'+esc(m.slot)+'</b>'+(m.fija ? ' 📌' : '')+(m.manual ? ' ✎' : '')+(m.ajustada ? ' ⚖' : '') +
-    '<p class="mplato">'+esc(m.name)+'</p>' +
-    '<p class="sub">×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+' · '+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p>'+real +
+  const v = valsComida(m), marca = (m.fija ? ' 📌' : '')+(m.manual ? ' ✎' : '')+(m.ajustada ? ' ⚖' : '');
+  let cuerpo;
+  if (e === 'cambio') {
+    const rv = valsComida(m.real);
+    cuerpo = '<p class="mplato">'+esc(m.real.name)+'</p>' +
+      '<p class="mkcal">'+Math.round(rv.kcal)+' kcal <small>· P '+r1(rv.prot)+' · C '+r1(rv.carb)+' · G '+r1(rv.fat)+'</small></p>' +
+      '<p class="sub mprev">Previsto: '+esc(m.name)+' · '+Math.round(v.kcal)+' kcal ('+delta(rv.kcal-v.kcal, 0)+')</p>';
+  } else if (e === 'no') {
+    cuerpo = '<p class="mplato mtach">'+esc(m.name)+'</p><p class="sub">No se comió · '+txtVariacion(v, CERO0)+'</p>';
+  } else {
+    cuerpo = '<p class="mplato">'+esc(m.name)+'</p>' +
+      '<p class="sub">×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+' · '+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p>';
+  }
+  return '<button class="mcard e-'+e+'" data-act="comidaDlg" data-d="'+i+'" data-m="'+j+'">'+num+'<div class="mbody"><b class="mt">'+esc(m.slot)+'</b>'+marca+cuerpo+
     '<p style="margin-top:4px">'+chip(e)+'</p></div><span class="chev">›</span></button>';
 }
 const LET = ['L','M','X','J','V','S','D'];
@@ -869,12 +866,16 @@ function dlgComida(){
   const ing = (m.ing && m.ing.length) ? m.ing : null;
   let h = '<div class="pgr"><div class="pgr-h"><div class="grow"><b class="pgr-t">'+esc(m.slot)+'</b><p class="sub">'+esc(DIAS[sl.d])+' · '+(sl.m+1)+' / '+n+'</p></div>' +
     '<button class="pgr-x" data-act="cerrar" aria-label="Cerrar">×</button></div><div class="pgr-b">' +
-    '<p class="pgr-plato">'+esc(m.name)+'</p>' +
-    '<div class="pgr-kcal">'+Math.round(v.kcal)+'<small> kcal</small></div>' +
-    '<p class="pgr-mac">P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p>' +
-    '<p class="sub" style="text-align:center">Ración ×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+'</p>' +
+    (e === 'cambio' ? (() => { const rv = valsComida(m.real); return '<p class="pgr-plato">'+esc(m.real.name)+'</p>' +
+      '<div class="pgr-kcal">'+Math.round(rv.kcal)+'<small> kcal</small></div>' +
+      '<p class="pgr-mac">P '+r1(rv.prot)+' · C '+r1(rv.carb)+' · G '+r1(rv.fat)+'</p>' +
+      (m.real.rid !== 'libre' ? '<div class="btn-row" style="margin:8px 0"><button class="btn secondary" data-act="escalaReal" data-n="-0.1">− Ración</button><b style="align-self:center;text-align:center;min-width:64px;font-size:18px">×'+kgTxt(Math.round(m.real.s*100)/100)+'</b><button class="btn secondary" data-act="escalaReal" data-n="0.1">＋ Ración</button></div>' : '') +
+      '<div class="pgr-prev"><p class="sub">Previsto (no comido)</p><b>'+esc(m.name)+'</b><p class="sub">'+Math.round(v.kcal)+' kcal · P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p><p class="sub">Variación: '+txtVariacion(v, rv)+'</p></div>'; })()
+    : '<p class="pgr-plato'+(e === 'no' ? ' mtach' : '')+'">'+esc(m.name)+'</p>' +
+      '<div class="pgr-kcal">'+Math.round(v.kcal)+'<small> kcal</small></div>' +
+      '<p class="pgr-mac">P '+r1(v.prot)+' · C '+r1(v.carb)+' · G '+r1(v.fat)+'</p>' +
+      '<p class="sub" style="text-align:center">Ración ×'+kgTxt(Math.round(m.s*100)/100)+(m.bw ? ' · '+Math.round(v.g)+' g' : '')+'</p>') +
     '<p style="text-align:center;margin:10px 0">'+chip(e)+'</p>' +
-    (e === 'cambio' ? '<div class="card accent" style="margin-bottom:10px"><p class="sub">Has comido</p><b>'+esc(m.real.name)+'</b><p class="sub">'+macTxt(valsComida(m.real))+'</p><p class="sub">Variación: '+txtVariacion(v, valsComida(m.real))+'</p></div>' : '') +
     (e === 'no' ? '<div class="card accent" style="margin-bottom:10px"><p class="sub">Variación sobre el plan: '+txtVariacion(v, CERO0)+'</p></div>' : '') +
     '<button class="btn" style="margin-bottom:10px" data-act="marcaHecho">✅ Lo he hecho</button>' +
     '<button class="btn secondary" style="margin-bottom:10px" data-act="realDlg">🔁 He comido otra cosa</button>' +
@@ -987,7 +988,7 @@ async function cambiarSlot(fn, cerrar, aviso, reabrir){
   const sl = S.slot; if (!sl) return;
   const antes = totalDia(S.menu[sl.d]);
   fn(S.menu[sl.d].meals[sl.m]);
-  if (esCopia(pacienteActual()) && reabrir !== dlgReal) S.menu[sl.d].meals[sl.m].manual = true;
+  if (esCopia(pacienteActual()) && reabrir !== dlgReal && reabrir !== dlgComida) S.menu[sl.d].meals[sl.m].manual = true;
   { const des = totalDia(S.menu[sl.d]); if (Math.abs(des.kcal - antes.kcal) + Math.abs(des.prot - antes.prot) + Math.abs(des.carb - antes.carb) + Math.abs(des.fat - antes.fat) > 0.5) {
     const pp = pacienteActual(), ob = pp && objetivoDia(pp, sl.d);
     aviso = (aviso || DIAS[sl.d]+' · '+S.menu[sl.d].meals[sl.m].slot+':') + ' Variación del día: '+txtVariacion(antes, des)+'. El día queda en '+fmtN(des.kcal)+(ob ? ' de '+ob.kcal : '')+' kcal · P '+Math.round(des.prot)+(ob ? '/'+ob.prot : '')+' · C '+Math.round(des.carb)+(ob ? '/'+ob.carb : '')+' · G '+Math.round(des.fat)+(ob ? '/'+ob.fat : '')+'.'; } }
@@ -2291,10 +2292,10 @@ document.addEventListener('click', e => {
     case 'realDlg': S.realQ = ''; dlgReal(); break;
     case 'elegirReal': { const r = recetaPorId(t.dataset.id); if (r) { const m0 = S.menu[S.slot.d].meals[S.slot.m], plan = valsComida(m0);
         const sc = Math.round(clamp(plan.kcal/Math.max(r.kcal,1), 0.3, 3)*20)/20;
-        cambiarSlot(m => { m.real = comidaDe(r, m.slot, sc); }, false, null, dlgReal); } break; }
-    case 'noComi': cambiarSlot(m => { m.real = {none:true}; }, false, null, dlgReal); break;
-    case 'quitarReal': cambiarSlot(m => { delete m.real; }, false, null, dlgReal); break;
-    case 'escalaReal': cambiarSlot(m => { if (m.real && !m.real.none) m.real.s = Math.round(clamp(m.real.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }, false, null, dlgReal); break;
+        cambiarSlot(m => { delete m.estado; m.real = comidaDe(r, m.slot, sc); }, false, null, dlgComida); } break; }
+    case 'noComi': cambiarSlot(m => { m.real = {none:true}; }, false, null, dlgComida); break;
+    case 'quitarReal': cambiarSlot(m => { delete m.real; }, false, null, dlgComida); break;
+    case 'escalaReal': cambiarSlot(m => { if (m.real && !m.real.none) m.real.s = Math.round(clamp(m.real.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }, false, null, dlgComida); break;
     case 'proponerMenu':
       if (S.menu && S.menu.some(d => d.meals && d.meals.some(m => m.rid)) && !t.dataset.seguro) { t.dataset.seguro = '1'; t.textContent = '⚠ Pulsa otra vez: se sustituye el menú'; break; }
       { const pp = pacienteActual();

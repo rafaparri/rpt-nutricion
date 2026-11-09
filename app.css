@@ -150,3 +150,10 @@ img.appicon.big{width:96px;height:96px;border-radius:24px}
 .pgr-dots i{width:10px;height:10px;border-radius:50%;background:var(--t-edge)}
 .pgr-dots i.on{width:34px;border-radius:6px;background:var(--t-accent)}
 .pgr-x{margin-left:auto}
+
+.mcard .mplato.mtach,.pgr-plato.mtach{text-decoration:line-through;opacity:.7}
+.mcard .mkcal{font-size:20px;font-weight:800;margin:2px 0}
+.mcard .mkcal small{font-size:15px;font-weight:600;color:var(--muted,#667)}
+.mcard .mprev{opacity:.75}
+.pgr-prev{margin:10px 0;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12);opacity:.85}
+.pgr-prev b{font-size:16px}
