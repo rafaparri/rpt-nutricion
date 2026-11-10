@@ -592,13 +592,17 @@ function totalReal(dia){
 const hayReal = dia => (dia.meals||[]).some(m => m.rid && (m.real || m.estado === 'hecho'));
 function dlgReal(){
   const p = pacienteActual(), sl = S.slot; if (!p || !sl) return;
-  const m = S.menu[sl.d].meals[sl.m], plan = valsComida(m);
-  const q = norm(S.realQ || '');
-  const lista = S.recipes.filter(r => (r.kcal||0) > 0 && (!q || norm([r.name, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0)).slice(0, q ? 30 : 12);
+  const m = S.menu[sl.d].meals[sl.m], plan = valsComida(m), ref = refDe(m);
+  const q = norm(S.realQ || ''), libre = !!(q || S.realModo === 'libre');
+  const buenas = S.recipes.filter(r => (r.kcal||0) > 0);
+  let lista;
+  if (!libre) lista = buenas.filter(r => r.id !== m.rid).map(r => ({r, sim:simPlato(r, plan, ref)})).sort((a, b) => b.sim - a.sim).slice(0, 8);
+  else lista = (q ? buenas.filter(r => norm([r.name, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0) : buenas.slice().sort((a, b) => a.name.localeCompare(b.name, 'es'))).slice(0, q ? 30 : 60).map(r => ({r}));
   let h = '<h2>¿Qué has comido?</h2><p class="sub" style="margin-bottom:10px">'+DIAS[sl.d]+' · '+esc(m.slot)+' · previsto: '+esc(m.name)+' ('+Math.round(plan.kcal)+' kcal). Toca un plato y ya está.</p>' +
-    '<div class="field"><input id="rq2" type="search" value="'+esc(S.realQ||'')+'" placeholder="Buscar plato…" autocomplete="off" aria-label="Buscar plato"></div>' +
-    (lista.length ? '<div class="list">'+lista.map(r => { const sc = Math.round(clamp(plan.kcal/Math.max(r.kcal,1), 0.3, 3)*20)/20;
-      return '<button class="row" data-act="elegirReal" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b><p class="sub">ración ×'+kgTxt(sc)+' · '+Math.round(r.kcal*sc)+' kcal · P '+r1(r.prot*sc)+' · C '+r1(r.carb*sc)+' · G '+r1(r.fat*sc)+'</p></div><span class="chev">›</span></button>'; }).join('')+'</div>' : '<p class="sub">Sin resultados.</p>') +
+    modoBotones(libre, 'realModo') +
+    (libre ? '<div class="field"><input id="rq2" type="search" value="'+esc(S.realQ||'')+'" placeholder="Buscar plato…" autocomplete="off" aria-label="Buscar plato"></div>' : '') +
+    (lista.length ? '<div class="list">'+lista.map(x => { const r = x.r, sc = Math.round(clamp(plan.kcal/Math.max(r.kcal,1), 0.3, 3)*20)/20;
+      return '<button class="row" data-act="elegirReal" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b>'+(x.sim != null ? ' <span style="font-weight:800;color:var(--t-accent)">'+x.sim+' % similar</span>' : '')+'<p class="sub">ración ×'+kgTxt(sc)+' · '+Math.round(r.kcal*sc)+' kcal · P '+r1(r.prot*sc)+' · C '+r1(r.carb*sc)+' · G '+r1(r.fat*sc)+'</p></div><span class="chev">›</span></button>'; }).join('')+'</div>' : '<p class="sub">Sin resultados.</p>') +
     '<details class="card" style="margin-top:12px"><summary style="font-weight:800;font-size:17px">✍ Escribir lo que he comido</summary><div class="field" style="margin-top:10px"><textarea id="rl_txt" rows="3" placeholder="150 g de pollo&#10;100 g de arroz" style="padding:12px 14px;line-height:1.4" aria-label="Ingredientes"></textarea></div><div class="msg err" id="rl_msg"></div><button class="btn secondary" data-act="realLibre">🧮 Calcular y guardar</button></details>' +
     '<div class="btn-row" style="margin-top:12px"><button class="btn secondary" data-act="comidaDlg" data-d="'+sl.d+'" data-m="'+sl.m+'">‹ Volver</button></div>';
   abrirDlg(h);
@@ -631,6 +635,19 @@ const chip = e => '<span style="font-weight:800;font-size:17px;color:'+CHIP[e][1
 const barra = (pct, col) => '<div style="height:10px;border-radius:6px;background:var(--t-line);overflow:hidden;margin:8px 0 6px"><div style="height:100%;width:'+Math.min(100, Math.round(pct*100))+'%;background:'+col+'"></div></div>';
 const macTxt = v => fmtN(v.kcal)+' kcal · P '+Math.round(v.prot)+' · C '+Math.round(v.carb)+' · G '+Math.round(v.fat);
 /* Cuánto se parece una receta a la comida actual: se compara con la misma energía y se miran los macros. */
+const BASES = ['pollo','pavo','ternera','cerdo','lomo','atun','salmon','merluza','bacalao','gamba','huevo','tofu','lentej','garbanzo','arroz','pasta','patata','tortilla','wrap','pan'];
+function textoPlato(r){ return norm([r && r.name, ((r && r.ingredients) || []).join(' ')].join(' ')); }
+function baseComun(r, ref){ // ingredientes principales que comparten (pollo, arroz, tortilla…)
+  const a = textoPlato(r), b = textoPlato(ref); return BASES.filter(w => a.indexOf(w) >= 0 && b.indexOf(w) >= 0);
+}
+function simPlato(r, v, ref){ // parecido nutricional + pequeño empujón si comparten ingrediente principal
+  const c = baseComun(r, ref), prot = c.filter(w => BASES.indexOf(w) < 12);
+  return Math.min(100, similitud(r, v) + (prot.length ? 8 : 0) + (c.length > prot.length ? 3 : 0));
+}
+function refDe(m){ const r = m.rid && recetaPorId(m.rid); return r || {name:m.name, ingredients:m.ing || []}; }
+function modoBotones(libre, act){
+  return '<div class="btn-row" style="margin-bottom:12px"><button class="btn'+(libre ? ' secondary' : '')+'" data-act="'+act+'" data-n="sim">✨ Recomendar similar</button><button class="btn'+(libre ? '' : ' secondary')+'" data-act="'+act+'" data-n="libre">🔎 Elegir plato libre</button></div>';
+}
 function similitud(r, v){
   const s = Math.round(clamp(v.kcal/Math.max(r.kcal, 1), 0.5, 2.5)*20)/20;
   const x = {kcal:r.kcal*s, prot:r.prot*s, carb:r.carb*s, fat:r.fat*s};
@@ -924,9 +941,11 @@ function dlgSlot(){
   const delDia = {}; dia.meals.forEach(x => { if (x.rid && x !== m) delDia[x.rid] = true; });
   const q = norm(S.slotQ || '');
   const base = q ? S.recipes.filter(r => (r.kcal||0) > 0 && norm([r.name, r.useIn, (r.ingredients||[]).join(' ')].join(' ')).indexOf(q) >= 0) : candidatas(m.slot);
-  const vAct = m.rid ? valsComida(m) : null, simDe = r => vAct ? similitud(r, vAct) : null;
-  const cands = (vAct && !q ? base.filter(r => r.id !== m.rid).map(r => ({r, sim:simDe(r)})).sort((a, b) => b.sim - a.sim).map(x => x.r)
-    : (t ? base.map(r => ({r, sc:puntua(r, t, usos, null, delDia)})).sort((a,b) => a.sc - b.sc).map(x => x.r) : base)).slice(0, q ? 30 : (S.slotAll ? 999 : 10));
+  const vAct = m.rid ? valsComida(m) : null, refA = vAct ? refDe(m) : null, simDe = r => vAct ? simPlato(r, vAct, refA) : null;
+  const libre = !!(vAct && (q || S.slotModo === 'libre'));
+  const cands = (vAct ? (libre ? (q ? base : S.recipes.filter(r => (r.kcal||0) > 0).sort((a, b) => a.name.localeCompare(b.name, 'es')))
+      : base.filter(r => r.id !== m.rid).map(r => ({r, sim:simDe(r)})).sort((a, b) => b.sim - a.sim).map(x => x.r))
+    : (t ? base.map(r => ({r, sc:puntua(r, t, usos, null, delDia)})).sort((a,b) => a.sc - b.sc).map(x => x.r) : base)).slice(0, q ? 30 : (libre || S.slotAll ? 999 : 8));
   let cabecera = '<h2>'+DIAS[sl.d]+' · '+esc(m.slot)+'</h2>';
   if (t) cabecera += '<p class="sub" style="margin-bottom:12px">Objetivo de esta comida: '+Math.round(t.kcal)+' kcal · P '+Math.round(t.prot)+' · C '+Math.round(t.carb)+' · G '+Math.round(t.fat)+'</p>';
   let actual = '';
@@ -936,14 +955,14 @@ function dlgSlot(){
       '<div class="btn-row"><button class="btn secondary" data-act="escalaSlot" data-n="-0.1" aria-label="Menos ración">− Ración</button><b style="align-self:center;text-align:center;min-width:64px">×'+kgTxt(Math.round(m.s*100)/100)+'</b><button class="btn secondary" data-act="escalaSlot" data-n="0.1" aria-label="Más ración">＋ Ración</button></div>' +
       '<button class="btn danger" style="margin-top:10px" data-act="quitarSlot">'+(m.extra ? 'Eliminar este plato adicional' : 'Quitar esta comida')+'</button></div>';
   } else if (m.extra) actual = '<button class="btn danger" style="margin-bottom:12px" data-act="quitarSlot">Eliminar este plato adicional</button>';
-  const buscador = '<div class="field"><label class="f" for="sq">Buscar receta</label><input id="sq" type="search" value="'+esc(S.slotQ||'')+'" placeholder="Nombre o ingrediente…" autocomplete="off"></div>';
+  const buscador = (vAct && !libre) ? '' : '<div class="field"><label class="f" for="sq">Buscar receta</label><input id="sq" type="search" value="'+esc(S.slotQ||'')+'" placeholder="Nombre o ingrediente…" autocomplete="off"></div>';
   const sinKcal = S.recipes.filter(r => !(r.kcal > 0)).length;
-  const lista = buscador + '<button class="btn secondary" style="margin-bottom:10px" data-act="recetaDesdeSlot">＋ Añadir receta a mano</button>' +
-    (sinKcal ? '<p class="sub" style="margin-bottom:10px">⚠ '+sinKcal+' receta'+(sinKcal>1?'s':'')+' sin calorías no sale'+(sinKcal>1?'n':'')+' aquí. Ábrela'+(sinKcal>1?'s':'')+' en el Recetario y pulsa «Calcular macros».</p>' : '') + (cands.length ? '<h3 style="margin:6px 0">'+(q ? 'Resultados' : vAct ? 'Platos parecidos a este' : 'Recetas que encajan')+'</h3><div class="list">' + cands.filter(r => r.id !== m.rid).map(r => {
+  const lista = (vAct ? modoBotones(libre, 'slotModo') : '') + buscador + (vAct && !libre ? '' : '<button class="btn secondary" style="margin-bottom:10px" data-act="recetaDesdeSlot">＋ Añadir receta a mano</button>') +
+    (sinKcal ? '<p class="sub" style="margin-bottom:10px">⚠ '+sinKcal+' receta'+(sinKcal>1?'s':'')+' sin calorías no sale'+(sinKcal>1?'n':'')+' aquí. Ábrela'+(sinKcal>1?'s':'')+' en el Recetario y pulsa «Calcular macros».</p>' : '') + (cands.length ? '<h3 style="margin:6px 0">'+(q ? 'Resultados' : vAct ? (libre ? 'Todas las recetas' : 'Platos parecidos a «'+esc(m.name)+'»') : 'Recetas que encajan')+'</h3><div class="list">' + cands.filter(r => r.id !== m.rid).map(r => {
     const s = t ? escalaPara(r, t) : 1;
-    return '<button class="row" data-act="elegirReceta" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b>'+(vAct ? ' <span style="font-weight:800;color:var(--t-accent)">'+simDe(r)+' % similar</span>' : '')+'<p class="sub">ración ×'+kgTxt(s)+' · '+Math.round(r.kcal*s)+' kcal · P '+r1(r.prot*s)+' · C '+r1(r.carb*s)+' · G '+r1(r.fat*s)+'</p></div><span class="chev">›</span></button>';
+    return '<button class="row" data-act="elegirReceta" data-id="'+esc(r.id)+'"><div class="grow"><b>'+esc(r.name)+'</b>'+(vAct && !libre ? ' <span style="font-weight:800;color:var(--t-accent)">'+simDe(r)+' % similar</span>' : '')+'<p class="sub">ración ×'+kgTxt(s)+' · '+Math.round(r.kcal*s)+' kcal · P '+r1(r.prot*s)+' · C '+r1(r.carb*s)+' · G '+r1(r.fat*s)+'</p></div><span class="chev">›</span></button>';
   }).join('') + '</div>' : '<div class="empty">'+(q ? 'Ninguna receta coincide.' : /^Postre/.test(m.slot) ? 'No hay recetas de postre. Crea una en el Recetario y marca «Postre» en «Utilizar en».' : 'No hay recetas para esta comida. Añade recetas en el Recetario.')+'</div>');
-  const hayMas = !q && !S.slotAll && base.filter(r => r.id !== m.rid).length > 10;
+  const hayMas = !q && !libre && !S.slotAll && base.filter(r => r.id !== m.rid).length > 8;
   const verTodas = hayMas ? '<button class="btn secondary" style="margin-top:10px" data-act="slotTodas">Ver todas las recetas ('+base.filter(r => r.id !== m.rid).length+')</button>' : '';
   const botonReal = m.rid ? '<button class="btn secondary" style="margin-bottom:12px" data-act="realDlg">🔁 Cambio sobre la marcha'+(m.real ? ' (registrado)' : '')+'</button>' : '';
   abrirDlg(cabecera + actual + botonReal + lista + verTodas + '<button class="btn ghost" style="margin-top:12px" data-act="cerrar">Cerrar</button>');
@@ -1416,7 +1435,7 @@ function vRecetario(){
     '<button class="btn secondary" style="margin-top:10px" data-act="revisarRec">🔎 Revisar recetas con la base de ingredientes</button>' +
     '<button class="btn secondary" style="margin-top:10px" data-act="fotoAlim">📷 Añadir un alimento con foto'+((S.foods||[]).length ? ' ('+S.foods.length+' propios)' : '')+'</button>' +
     ((S.foods||[]).length ? '<button class="btn ghost" style="margin-top:6px" data-act="misAlim">Ver mis alimentos</button>' : '') +
-    '<button class="btn ghost" style="margin-top:10px" data-act="platosFuera">🍔 Añadir platos preparados (Burger King, salmorejo…)</button>' +
+    '<button class="btn ghost" style="margin-top:10px" data-act="platosFuera">🍔 Añadir platos preparados (fajitas, wraps, Burger King…)</button>' +
     '<button class="btn ghost" style="margin-top:10px" data-act="postresBase">🍎 Añadir postres básicos (fruta, yogur…)</button>' +
     (S.recipes.length ? '<button class="btn danger" style="margin-top:14px" data-act="borrarTodasDlg">🗑 Eliminar recetas… ('+S.recipes.length+')</button>' : '') +
     '<input id="docxIn" type="file" accept=".docx" multiple style="display:none"></div>';
@@ -1881,6 +1900,22 @@ const POSTRES_BASE = [
 ];
 /* Platos de comida rápida: valores ESTIMADOS (el producto salió el 3-nov-2026 y Burger King no publica aún la ficha en abierto). Sustituir por la ficha oficial. */
 const PLATOS_FUERA = [
+  ['Fajitas de pollo con pimientos y cebolla', 'Almuerzo, Cena', ['150 g pechuga de pollo', '2 tortillas de trigo', '80 g pimiento', '60 g cebolla', '8 g aceite de oliva', '20 g queso rallado'],
+   'Corta el pollo en tiras y saltéalo con el pimiento y la cebolla en juliana, con pimentón, comino y ajo. Rellena las tortillas calientes y añade el queso.'],
+  ['Wrap de pollo, lechuga y yogur', 'Almuerzo, Cena', ['150 g pechuga de pollo', '1 tortilla de trigo', '40 g lechuga', '50 g tomate', '40 g yogur natural', '20 g queso rallado'],
+   'Pollo a la plancha en tiras, con lechuga, tomate y una salsa de yogur natural con limón y especias. Enrolla en la tortilla.'],
+  ['Tacos de pollo con pimiento y aguacate', 'Almuerzo, Cena', ['150 g pechuga de pollo', '3 tortillas de maíz', '60 g pimiento', '50 g cebolla', '5 g aceite de oliva', '30 g aguacate'],
+   'Pollo salteado con pimiento y cebolla, servido en tres tortillas de maíz con aguacate y limón.'],
+  ['Quesadilla de pollo y verduras', 'Almuerzo, Cena', ['120 g pechuga de pollo', '2 tortillas de trigo', '40 g queso mozzarella', '60 g pimiento', '60 g cebolla', '5 g aceite de oliva'],
+   'Rellena una tortilla con pollo salteado, verdura y queso, tápala con la otra y dórala por los dos lados en la sartén.'],
+  ['Burrito de ternera con arroz y frijoles', 'Almuerzo, Cena', ['140 g ternera magra', '1 tortilla de trigo', '60 g frijoles cocidos [127/8.7/22.8/0.5]', '30 g arroz', '20 g queso rallado', '60 g tomate'],
+   'Ternera picada magra salteada con especias, mezclada con arroz cocido, frijoles y tomate. Envuelve en la tortilla con el queso.'],
+  ['Arroz con pollo y pimientos', 'Almuerzo, Cena', ['150 g pechuga de pollo', '60 g arroz', '100 g pimiento', '5 ml aceite de oliva'],
+   'Dora el pollo en dados, añade el pimiento y el arroz, cubre con agua o caldo y cuece unos 18 minutos.'],
+  ['Pasta salteada con pollo y verduras', 'Almuerzo, Cena', ['150 g pechuga de pollo', '70 g pasta', '100 g pimiento', '60 g cebolla', '8 g aceite de oliva'],
+   'Pasta cocida y salteada con el pollo en tiras, el pimiento y la cebolla.'],
+  ['Pavo con patata y calabacín', 'Almuerzo, Cena', ['160 g pechuga de pavo', '250 g patata', '100 g calabacín', '8 g aceite de oliva'],
+   'Pavo a la plancha con patata cocida y calabacín salteado.'],
   ['Hamburguesa Bacon King Pop doble carne + patatas (Burger King, estimado)', 'Almuerzo, Cena', ['280 g Bacon King Pop doble carne [339/21/17/19.6]', '117 g patatas fritas Burger King mediana [207/2.4/28.6/9.2]'],
    'Burger King. Hamburguesa: pan con bacon, dos carnes tipo Whopper, queso fundido, bacon crujiente y salsa Bacon Pop con toque de mantequilla (las palomitas van aparte). Patatas: ración mediana de 117 g (207 kcal por 100 g, según Yazio). VALORES ESTIMADOS de la hamburguesa a partir de hamburguesas parecidas de la carta (The King Bacon 2 carnes ≈ 1005 kcal, Doble Cheese Bacon XXL ≈ 959 kcal). Cuando tengas la ficha oficial de la app de Burger King, edita esta receta y cambia los números.', ['Bacon King Pop doble carne (Burger King, estimado)', 'Bacon King Pop doble carne + patatas (Burger King, estimado)']],
   ['Salmorejo Hacendado con AOVE 8 % (envase 330 ml)', 'Almuerzo, Cena', ['330 g Salmorejo Hacendado AOVE [134/1.5/9.5/10]'],
@@ -1903,7 +1938,7 @@ async function platosFuera(){
       n++;
     }
     await cargarRecetas();
-    setRmsg(n ? 'Listo: añadidos o actualizados '+n+' plato'+(n > 1 ? 's' : '')+' preparado'+(n > 1 ? 's' : '')+'. La hamburguesa de Burger King es una estimación; el salmorejo lleva los datos de la etiqueta.' : 'Ya tienes todos estos platos.', true);
+    setRmsg(n ? 'Listo: añadidos o actualizados '+n+' plato'+(n > 1 ? 's' : '')+' preparado'+(n > 1 ? 's' : '')+'. Los platos de Burger King son una estimación; el salmorejo lleva los datos de la etiqueta.' : 'Ya tienes todos estos platos.', true);
   } catch(e){ setRmsg('No se pudo añadir ('+((e && (e.code||e.message)) || 'error')+').', false); }
   render();
 }
@@ -2289,7 +2324,7 @@ document.addEventListener('click', e => {
     case 'semana': cambiarSemana(parseInt(t.dataset.n,10)); break;
     case 'recargar': recargar(); break;
     case 'vincular': dlgVinculo(); break;
-    case 'realDlg': S.realQ = ''; dlgReal(); break;
+    case 'realDlg': S.realQ = ''; S.realModo = 'sim'; dlgReal(); break;
     case 'elegirReal': { const r = recetaPorId(t.dataset.id); if (r) { const m0 = S.menu[S.slot.d].meals[S.slot.m], plan = valsComida(m0);
         const sc = Math.round(clamp(plan.kcal/Math.max(r.kcal,1), 0.3, 3)*20)/20;
         cambiarSlot(m => { delete m.estado; m.real = comidaDe(r, m.slot, sc); }, false, null, dlgComida); } break; }
@@ -2310,7 +2345,7 @@ document.addEventListener('click', e => {
     case 'fijasDlg': dlgFijas(); break;
     case 'guardarFijas': guardarFijas(t.dataset.todos === '1'); break;
     case 'guardarReparto': guardarReparto(); break;
-    case 'slotMenu': S.slotQ = ''; S.slot = {d:parseInt(t.dataset.d,10), m:parseInt(t.dataset.m,10)}; dlgSlot(); break;
+    case 'slotMenu': S.slotQ = ''; S.slotModo = 'sim'; S.slot = {d:parseInt(t.dataset.d,10), m:parseInt(t.dataset.m,10)}; dlgSlot(); break;
     case 'escalaSlot': cambiarSlot(m => { m.s = Math.round(clamp(m.s + parseFloat(t.dataset.n), 0.3, 3)*20)/20; }); break;
     case 'quitarSlot': if (S.menu[S.slot.d].meals[S.slot.m].extra) quitarExtra(); else cambiarSlot(m => { m.rid = null; delete m.name; }, true, 'Comida quitada.'); break;
     case 'addExtra': addExtra(parseInt(t.dataset.d, 10)); break;
@@ -2342,6 +2377,8 @@ document.addEventListener('click', e => {
     case 'misAlim': dlgMisAlim(); break;
     case 'guardarAlim': guardarAlim(); break;
     case 'borrarAlim': borrarAlim(t.dataset.id); break;
+    case 'slotModo': S.slotModo = t.dataset.n; S.slotQ = ''; S.slotAll = false; dlgSlot(); break;
+    case 'realModo': S.realModo = t.dataset.n; S.realQ = ''; dlgReal(); break;
     case 'slotTodas': S.slotAll = true; dlgSlot(); break;
     case 'platosFuera': platosFuera(); break;
     case 'postresBase': postresBase(); break;
@@ -2373,8 +2410,8 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('input', e => {
   if (e.target && e.target.dataset && e.target.dataset.filtra) { filtraSelect(e.target); return; }
-  if (e.target && e.target.id === 'rq2') { S.realQ = e.target.value; dlgReal(); const n = $('#rq2'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
-  if (e.target && e.target.id === 'sq') { S.slotQ = e.target.value; dlgSlot(); const n = $('#sq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; } if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
+  if (e.target && e.target.id === 'rq2') { S.realQ = e.target.value; if (S.realQ) S.realModo = 'libre'; dlgReal(); const n = $('#rq2'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; }
+  if (e.target && e.target.id === 'sq') { S.slotQ = e.target.value; if (S.slotQ) S.slotModo = 'libre'; dlgSlot(); const n = $('#sq'); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } return; } if (e.target && e.target.id === 'rq') { S.rq = e.target.value; render(); } });
 document.addEventListener('change', e => {
   if (e.target && e.target.id === 'd_tsel') { const w = document.getElementById('d_tdwrap'); if (w) w.style.display = e.target.value === 'otra' ? '' : 'none'; }
   if (e.target && e.target.classList && e.target.classList.contains('uso-ck')) { const r = $('#r_usoRes'); if (r) r.firstChild.textContent = usoResumen(); return; }
